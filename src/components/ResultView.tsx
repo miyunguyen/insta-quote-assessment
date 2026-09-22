@@ -198,7 +198,7 @@ function IssuesList({ issues }: { issues: ExtractionResult["issues"] }) {
   if (issues.length === 0) return null;
   return (
     <section className="mb-8">
-      <SectionHeader title="Conflicts &amp; calculated checks" count={issues.length} />
+      <SectionHeader title="Conflicts & calculated checks" count={issues.length} />
       <ul className="space-y-3">
         {issues.map((issue, index) => (
           <li

@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import type { ExtractionResult } from "@/server/extract/types";
 import { ResultView } from "./ResultView";
 
-const MAX_BYTES = 20 * 1024 * 1024;
+const MAX_BYTES = 10 * 1024 * 1024;
 
 const LOADING_STEPS = [
   "Uploading file…",
@@ -18,7 +18,9 @@ type Phase = "idle" | "loading" | "done" | "error";
 type ApiError = { code: string; message: string };
 
 function isPdfFile(file: File): boolean {
-  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  return (
+    file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+  );
 }
 
 export function UploadPanel() {
@@ -47,7 +49,7 @@ export function UploadPanel() {
       setPhase("error");
       setError({
         code: "too_large",
-        message: `"${chosen.name}" is ${Math.round(chosen.size / (1024 * 1024))} MB. The limit is 20 MB — this file was not uploaded.`,
+        message: `"${chosen.name}" is ${Math.round(chosen.size / (1024 * 1024))} MB. The limit is 10 MB — this file was not uploaded.`,
       });
       return;
     }
@@ -122,9 +124,7 @@ export function UploadPanel() {
         <p className="text-sm font-medium text-neutral-200">
           Drop a PDF here, or click to choose a file
         </p>
-        <p className="mt-1 text-xs text-neutral-500">
-          PDF only · max 20 MB · nothing is stored after extraction
-        </p>
+        <p className="mt-1 text-xs text-neutral-500">PDF only · max 10 MB</p>
         <input
           ref={inputRef}
           type="file"
