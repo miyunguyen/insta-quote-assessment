@@ -82,7 +82,9 @@ describe("parsePageLines", () => {
     expect(parsed.rows).toHaveLength(3);
     const texts = parsed.otherLines.map((l) => l.text);
     expect(texts.some((t) => t.includes("Summary: 14 pallets"))).toBe(true);
-    expect(texts.some((t) => t.includes("Driver notes: 16 pallets"))).toBe(true);
+    expect(texts.some((t) => t.includes("Driver notes: 16 pallets"))).toBe(
+      true,
+    );
     expect(texts.some((t) => t.startsWith("Total:"))).toBe(true);
   });
 
@@ -102,9 +104,14 @@ describe("parsePageLines", () => {
     const header: PageLine = {
       y: 100,
       text: "Item Description Qty Unit Unit Price Line Total",
-      tokens: ["Item", "Description", "Qty", "Unit", "Unit Price", "Line Total"].map(
-        (str, i) => ({ str, x: i * 10, y: 100, width: 5, fontSize: 10 }),
-      ),
+      tokens: [
+        "Item",
+        "Description",
+        "Qty",
+        "Unit",
+        "Unit Price",
+        "Line Total",
+      ].map((str, i) => ({ str, x: i * 10, y: 100, width: 5, fontSize: 10 })),
     };
     const badRow: PageLine = {
       y: 80,
@@ -144,8 +151,6 @@ describe("parsePageLines", () => {
         .split(" ")
         .map((str, i) => ({ str, x: i * 20, y, width: 10, fontSize: 10 })),
     });
-    // Before the table-presence gate, the second line ("Thank you ...")
-    // was promoted to section title on every such page.
     const parsed = parsePageLines(1, [
       textLine(100, "Dear Sir,"),
       textLine(90, "Thank you for your letter."),
