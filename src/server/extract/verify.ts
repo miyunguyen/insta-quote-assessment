@@ -1,4 +1,4 @@
-import { evidenceContains } from "./normalize";
+import { evidenceContains } from "@/lib/text";
 import { traceabilityRefusal } from "./rules";
 import type {
   DocumentFields,

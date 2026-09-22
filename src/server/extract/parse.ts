@@ -1,4 +1,4 @@
-import { collapseWhitespace } from "./normalize";
+import { collapseWhitespace } from "@/lib/text";
 import type { PageLine } from "./pdf";
 
 export type MetaKey = "documentNumber" | "date" | "deliveredTo" | "orderedBy";

@@ -1,4 +1,4 @@
-import { collapseWhitespace } from "./normalize";
+import { collapseWhitespace } from "@/lib/text";
 import type { PageLine, PageToken } from "./pdf";
 import type { EvidenceRect } from "./types";
 

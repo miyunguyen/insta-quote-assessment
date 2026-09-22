@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ExtractionResult } from "@/server/extract/types";
 import { ResultView } from "./ResultView";
+import { uploadErrorLabel } from "./labels";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 
@@ -16,24 +17,6 @@ const LOADING_STEPS = [
 type Phase = "idle" | "loading" | "done" | "error";
 
 type ApiError = { code: string; message: string };
-
-const UPLOAD_ERROR_LABELS: Record<string, string> = {
-  missing_file: "No file chosen",
-  not_a_pdf: "Not a PDF",
-  not_pdf: "Not a PDF",
-  too_large: "File too large",
-  encrypted_pdf: "Encrypted PDF",
-  unreadable_pdf: "Unreadable PDF",
-  internal_error: "Server error",
-  network: "Connection failed",
-};
-
-function uploadErrorLabel(code: string): string {
-  return (
-    UPLOAD_ERROR_LABELS[code] ??
-    (code.startsWith("http_") ? "Request failed" : "Upload failed")
-  );
-}
 
 function isPdfFile(file: File): boolean {
   return (

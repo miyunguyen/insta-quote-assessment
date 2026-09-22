@@ -1,3 +1,6 @@
+// Shared pure text utilities — framework-free, safe to import from both
+// server extraction code and client components.
+
 export function collapseWhitespace(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
-import { evidenceContains, parseLeadingAmount } from "@/server/extract/normalize";
+import { evidenceContains, parseLeadingAmount } from "@/lib/text";
 import { loadPages } from "@/server/extract/pdf";
 
 const samplesDir = path.resolve(process.cwd(), "sample-files-variant-A");

@@ -1,4 +1,4 @@
-import { parseLeadingAmount } from "./normalize";
+import { parseLeadingAmount } from "@/lib/text";
 import type { EvidenceRect, FieldValue, Issue } from "./types";
 
 export function round2(n: number): number {

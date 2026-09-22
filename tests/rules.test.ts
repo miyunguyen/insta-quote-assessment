@@ -6,7 +6,7 @@ import type { DocumentLoadResult, PageLine, PageResult } from "@/server/extract/
 import { verifyTraceability } from "@/server/extract/verify";
 import {
   evidenceContains,
-} from "@/server/extract/normalize";
+} from "@/lib/text";
 import type { ExtractionResult, FieldValue, LineItem, Refusal } from "@/server/extract/types";
 
 const samplesDir = path.resolve(process.cwd(), "sample-files-variant-A");
