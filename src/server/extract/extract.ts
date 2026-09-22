@@ -1,4 +1,4 @@
-import { loadPages, type DocumentLoadResult } from "./pdf";
+import { loadPages, type DocumentLoadResult, type PageLine } from "./pdf";
 import { headerFieldNames, parsePageLines, type ParsedPage } from "./parse";
 import {
   ambiguousReferenceRefusal,
@@ -19,6 +19,7 @@ import {
 } from "./validate";
 import { verifyTraceability } from "./verify";
 import { parseLeadingAmount } from "./normalize";
+import { lineRect, locateRect, tokenRect } from "./rects";
 import {
   extractionResultSchema,
   type DocumentFields,
@@ -68,21 +69,50 @@ export function buildExtraction(
   const metaClaims: MetaClaim[] = [];
   const totalClaims: FieldValue[] = [];
   const notes: NoteLine[] = [];
-  let firstSectionTitle: { value: string; page: number } | null = null;
+  let firstSectionTitle: {
+    value: string;
+    page: number;
+    lineNumber: number | null;
+  } | null = null;
+
+  // Raw page lines keyed by page, so every evidence box can be pinned to the
+  // exact tokens it was read from (parsed rows keep lineNumber indices).
+  const linesByPage = new Map<number, PageLine[]>();
+  for (const page of doc.pages) {
+    if (page.status === "ok") linesByPage.set(page.pageNumber, page.lines);
+  }
+  const lineOf = (
+    pageNumber: number,
+    lineNumber: number,
+  ): PageLine | undefined => linesByPage.get(pageNumber)?.[lineNumber];
+  const wholeLineRect = (pageNumber: number, lineNumber: number) => {
+    const found = lineOf(pageNumber, lineNumber);
+    return found ? lineRect(found) : undefined;
+  };
 
   for (const page of parsed) {
     const section = page.sectionTitle ?? `Page ${page.pageNumber}`;
 
     if (page.sectionTitle && firstSectionTitle === null) {
-      firstSectionTitle = { value: page.sectionTitle, page: page.pageNumber };
+      firstSectionTitle = {
+        value: page.sectionTitle,
+        page: page.pageNumber,
+        lineNumber: page.titleLineNumber,
+      };
     }
 
     for (const m of page.meta) {
+      const metaLine = lineOf(page.pageNumber, m.lineNumber);
       metaClaims.push({
         key: m.key,
         value: m.value,
         sourceText: m.sourceText,
         page: page.pageNumber,
+        // Pin to this line's own value occurrence — e.g. date
+        // "12 August 2026" must not resolve to a later "12" elsewhere.
+        rect: metaLine
+          ? locateRect(metaLine, m.valueStart, m.valueLength, m.value)
+          : undefined,
       });
     }
 
@@ -98,24 +128,39 @@ export function buildExtraction(
 
       for (const row of page.rows) {
         const record: Record<string, FieldValue> = {};
+        const rowLine = lineOf(page.pageNumber, row.lineNumber);
         fieldNames.forEach((name, i) => {
           if (!name || name === "item") return;
           const cell = row.cells[i];
           if (!cell) return;
+          // cells[i] is tokens[i] by construction — the box is that token's
+          // own position, never a text re-search (so a quantity "12" can no
+          // longer land on the "12" inside a date on the same page).
+          const token = rowLine?.tokens[i];
           record[name] = {
             value: cell,
-            evidence: { page: page.pageNumber, sourceText: cell },
+            evidence: {
+              page: page.pageNumber,
+              sourceText: cell,
+              rect:
+                token && token.str === cell ? tokenRect(token) : undefined,
+            },
           };
         });
 
         if (!record.description) {
           refusals.push(
-            badRowRefusal(page.pageNumber, section, {
-              lineNumber: row.lineNumber,
-              lineText: row.lineText,
-              expectedCells: page.header?.length ?? 0,
-              actualCells: row.cells.length,
-            }),
+            badRowRefusal(
+              page.pageNumber,
+              section,
+              {
+                lineNumber: row.lineNumber,
+                lineText: row.lineText,
+                expectedCells: page.header?.length ?? 0,
+                actualCells: row.cells.length,
+              },
+              wholeLineRect(page.pageNumber, row.lineNumber),
+            ),
           );
           continue;
         }
@@ -146,11 +191,22 @@ export function buildExtraction(
     }
 
     for (const bad of page.badRows) {
-      refusals.push(badRowRefusal(page.pageNumber, section, bad));
+      refusals.push(
+        badRowRefusal(
+          page.pageNumber,
+          section,
+          bad,
+          wholeLineRect(page.pageNumber, bad.lineNumber),
+        ),
+      );
     }
 
     for (const other of page.otherLines) {
-      notes.push({ text: other.text, page: page.pageNumber });
+      notes.push({
+        text: other.text,
+        page: page.pageNumber,
+        lineNumber: other.lineNumber,
+      });
 
       const totalLine = /^Total:\s*(.+)$/.exec(other.text);
       if (totalLine) {
@@ -163,14 +219,28 @@ export function buildExtraction(
               page.pageNumber,
               distinctAmounts,
               other.text,
+              wholeLineRect(page.pageNumber, other.lineNumber),
             ),
           );
           continue;
         }
         if (parseLeadingAmount(rest) !== null) {
+          // (.+)$ runs to the end of the match, so the value start needs no
+          // ambiguous indexOf search.
+          const raw = totalLine[1];
+          const leading = raw.length - raw.trimStart().length;
+          const valueStart =
+            totalLine.index + totalLine[0].length - raw.length + leading;
+          const totalLineRef = lineOf(page.pageNumber, other.lineNumber);
           totalClaims.push({
             value: rest,
-            evidence: { page: page.pageNumber, sourceText: other.text },
+            evidence: {
+              page: page.pageNumber,
+              sourceText: other.text,
+              rect: totalLineRef
+                ? locateRect(totalLineRef, valueStart, rest.length, rest)
+                : undefined,
+            },
           });
         } else {
           refusals.push(
@@ -179,6 +249,7 @@ export function buildExtraction(
               "total",
               rest,
               other.text,
+              wholeLineRect(page.pageNumber, other.lineNumber),
             ),
           );
         }
@@ -197,6 +268,7 @@ export function buildExtraction(
               label,
               rest,
               other.text,
+              wholeLineRect(page.pageNumber, other.lineNumber),
             ),
           );
         }
@@ -216,6 +288,7 @@ export function buildExtraction(
         evidence: {
           page: claims[0].page,
           sourceText: claims[0].sourceText,
+          rect: claims[0].rect,
         },
       };
     } else {
@@ -229,6 +302,10 @@ export function buildExtraction(
       evidence: {
         page: firstSectionTitle.page,
         sourceText: firstSectionTitle.value,
+        rect:
+          firstSectionTitle.lineNumber !== null
+            ? wholeLineRect(firstSectionTitle.page, firstSectionTitle.lineNumber)
+            : undefined,
       },
     };
   }
@@ -237,7 +314,7 @@ export function buildExtraction(
     fields.total = totalClaims[0];
   }
 
-  issues.push(...scanNumericClaimIssues(notes));
+  issues.push(...scanNumericClaimIssues(notes, linesByPage));
 
   if (fields.total) {
     const lineTotals = items

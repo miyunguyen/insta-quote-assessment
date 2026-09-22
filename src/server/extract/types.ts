@@ -1,8 +1,23 @@
 import { z } from "zod";
 
+export const evidenceRectSchema = z.object({
+  // PDF user-space units (points). x/y is the text baseline origin —
+  // the same transform[4]/transform[5] the viewer converts with
+  // viewport.convertToViewportPoint. height approximates the font size.
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number(),
+});
+export type EvidenceRect = z.infer<typeof evidenceRectSchema>;
+
 export const evidenceSchema = z.object({
   page: z.number().int().positive(),
   sourceText: z.string().min(1),
+  // Position captured at extraction time, so the viewer draws the box
+  // where the value actually sits instead of re-searching by text
+  // (first-match search misplaces boxes when text repeats on a page).
+  rect: evidenceRectSchema.optional(),
 });
 export type Evidence = z.infer<typeof evidenceSchema>;
 

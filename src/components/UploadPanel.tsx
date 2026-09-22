@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ExtractionResult } from "@/server/extract/types";
 import { ResultView } from "./ResultView";
 
@@ -18,24 +18,35 @@ type Phase = "idle" | "loading" | "done" | "error";
 type ApiError = { code: string; message: string };
 
 function isPdfFile(file: File): boolean {
-  return (
-    file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
-  );
+  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
 export function UploadPanel() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const pdfUrlRef = useRef<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [step, setStep] = useState(0);
   const [file, setFile] = useState<File | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [result, setResult] = useState<ExtractionResult | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [dragOver, setDragOver] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (pdfUrlRef.current) URL.revokeObjectURL(pdfUrlRef.current);
+    };
+  }, []);
 
   async function extract(chosen: File) {
     setFile(chosen);
     setResult(null);
     setError(null);
+    if (pdfUrlRef.current) {
+      URL.revokeObjectURL(pdfUrlRef.current);
+      pdfUrlRef.current = null;
+    }
+    setPdfUrl(null);
 
     if (!isPdfFile(chosen)) {
       setPhase("error");
@@ -79,6 +90,12 @@ export function UploadPanel() {
         return;
       }
 
+      // The viewer renders from the uploaded file itself (zero bytes
+      // transferred, zero decoding) — the API response carries only data.
+      const url = URL.createObjectURL(chosen);
+      pdfUrlRef.current = url;
+      setPdfUrl(url);
+
       setResult(payload as ExtractionResult);
       setPhase("done");
     } catch (err) {
@@ -117,14 +134,16 @@ export function UploadPanel() {
         }}
         className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-10 text-center transition-colors ${
           dragOver
-            ? "border-sky-500 bg-sky-950/30"
-            : "border-neutral-700 bg-neutral-900/40 hover:border-neutral-500"
+            ? "border-blue-400 bg-blue-50"
+            : "border-neutral-300 bg-neutral-50 hover:border-neutral-400 hover:bg-white"
         }`}
       >
-        <p className="text-sm font-medium text-neutral-200">
+        <p className="text-base font-medium text-neutral-900">
           Drop a PDF here, or click to choose a file
         </p>
-        <p className="mt-1 text-xs text-neutral-500">PDF only · max 10 MB</p>
+        <p className="mt-1 text-sm text-neutral-500">
+          PDF only · max 10 MB · nothing is stored after extraction
+        </p>
         <input
           ref={inputRef}
           type="file"
@@ -139,16 +158,16 @@ export function UploadPanel() {
       </div>
 
       {phase === "loading" && (
-        <div className="rounded-lg border border-sky-800 bg-sky-950/30 p-4">
-          <p className="text-sm font-medium text-sky-200">
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <p className="text-[15px] font-medium text-blue-950">
             Processing {file?.name}
           </p>
           <ul className="mt-2 space-y-1">
             {LOADING_STEPS.map((label, index) => (
               <li
                 key={label}
-                className={`text-sm ${
-                  index <= step ? "text-sky-300" : "text-neutral-600"
+                className={`text-[15px] ${
+                  index <= step ? "text-blue-900" : "text-neutral-400"
                 }`}
               >
                 {index <= step ? `✓ ${label}` : `· ${label}`}
@@ -161,17 +180,17 @@ export function UploadPanel() {
       {phase === "error" && error && (
         <div
           role="alert"
-          className="rounded-lg border border-red-800 bg-red-950/40 p-4"
+          className="rounded-lg border border-red-300 bg-red-50 p-4"
         >
           <div className="flex items-center gap-2">
-            <span className="rounded bg-red-900/60 px-1.5 py-0.5 font-mono text-xs text-red-300">
+            <span className="rounded border border-red-200 bg-red-100 px-1.5 py-0.5 font-mono text-xs text-red-900">
               {error.code}
             </span>
-            <span className="text-sm font-medium text-red-200">
+            <span className="text-[15px] font-medium text-red-950">
               Extraction could not run
             </span>
           </div>
-          <p className="mt-2 text-sm leading-relaxed text-red-100">
+          <p className="mt-2 text-[15px] leading-relaxed text-red-900">
             {error.message}
           </p>
           <button
@@ -181,14 +200,16 @@ export function UploadPanel() {
               setError(null);
               setFile(null);
             }}
-            className="mt-3 rounded border border-red-700 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40"
+            className="mt-3 rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm text-red-800 hover:bg-red-100"
           >
             Choose another file
           </button>
         </div>
       )}
 
-      {phase === "done" && result && <ResultView result={result} />}
+      {phase === "done" && result && (
+        <ResultView result={result} pdfUrl={pdfUrl} />
+      )}
     </div>
   );
 }

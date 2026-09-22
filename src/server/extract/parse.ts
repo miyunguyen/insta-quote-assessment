@@ -8,6 +8,8 @@ export type RawMeta = {
   value: string;
   sourceText: string;
   lineNumber: number;
+  valueStart: number;
+  valueLength: number;
 };
 
 export type ParsedRow = {
@@ -31,6 +33,7 @@ export type OtherLine = {
 export type ParsedPage = {
   pageNumber: number;
   sectionTitle: string | null;
+  titleLineNumber: number | null;
   header: string[] | null;
   headerLineNumber: number | null;
   rows: ParsedRow[];
@@ -46,10 +49,26 @@ const META_PATTERNS: Array<{ key: MetaKey; re: RegExp }> = [
   { key: "orderedBy", re: /^Ordered by:\s*(.+)$/i },
 ];
 
-function matchMeta(text: string): { key: MetaKey; value: string } | null {
+function matchMeta(text: string): {
+  key: MetaKey;
+  value: string;
+  valueStart: number;
+  valueLength: number;
+} | null {
   for (const { key, re } of META_PATTERNS) {
     const m = re.exec(text);
-    if (m) return { key, value: m[1].trim() };
+    if (!m) continue;
+    // Every pattern ends with (.+)$, so the raw capture always runs to the
+    // end of the match — its start needs no ambiguous indexOf search.
+    const raw = m[1];
+    const leading = raw.length - raw.trimStart().length;
+    const value = raw.trim();
+    return {
+      key,
+      value,
+      valueStart: m.index + m[0].length - raw.length + leading,
+      valueLength: value.length,
+    };
   }
   return null;
 }
@@ -82,6 +101,8 @@ export function parsePageLines(
         value: m.value,
         sourceText: text,
         lineNumber: i,
+        valueStart: m.valueStart,
+        valueLength: m.valueLength,
       });
       consumed.add(i);
       if (firstMetaIndex === -1) firstMetaIndex = i;
@@ -155,6 +176,7 @@ export function parsePageLines(
   return {
     pageNumber,
     sectionTitle,
+    titleLineNumber: titleIndex >= 0 ? titleIndex : null,
     header,
     headerLineNumber,
     rows,

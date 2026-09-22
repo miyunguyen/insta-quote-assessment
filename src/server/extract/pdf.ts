@@ -6,6 +6,7 @@ export type PageToken = {
   y: number;
   width: number;
   fontSize: number;
+  height?: number;
 };
 
 export type PageLine = {
@@ -52,6 +53,10 @@ function toItem(raw: unknown): PageToken | null {
     y: transform[5],
     width: typeof item.width === "number" ? item.width : 0,
     fontSize,
+    height:
+      typeof item.height === "number" && item.height > 0
+        ? item.height
+        : fontSize,
   };
 }
 

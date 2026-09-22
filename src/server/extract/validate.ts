@@ -1,5 +1,13 @@
 import { parseLeadingAmount } from "./normalize";
-import type { Claim, FieldValue, Issue, LineItem } from "./types";
+import type { PageLine } from "./pdf";
+import { locateRect } from "./rects";
+import type {
+  Claim,
+  EvidenceRect,
+  FieldValue,
+  Issue,
+  LineItem,
+} from "./types";
 
 export function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -17,6 +25,7 @@ export type MetaClaim = {
   value: string;
   sourceText: string;
   page: number;
+  rect?: EvidenceRect;
 };
 
 export function metaContradictionIssue(
@@ -38,19 +47,28 @@ export function metaContradictionIssue(
     claims: claims.map((c) => ({
       label: `Page ${c.page}`,
       value: c.value,
-      evidence: { page: c.page, sourceText: c.sourceText },
+      evidence: { page: c.page, sourceText: c.sourceText, rect: c.rect },
     })),
   };
 }
 
-export type NoteLine = { text: string; page: number };
+export type NoteLine = { text: string; page: number; lineNumber: number };
 
 const NUMERIC_CLAIM_RE = /(\d+)\s+(pallets?)\b/gi;
 
-export function scanNumericClaimIssues(notes: NoteLine[]): Issue[] {
+export function scanNumericClaimIssues(
+  notes: NoteLine[],
+  linesByPage: Map<number, PageLine[]>,
+): Issue[] {
   const groups = new Map<
     string,
-    Array<{ noun: string; num: string; matchText: string; note: NoteLine }>
+    Array<{
+      noun: string;
+      num: string;
+      matchText: string;
+      matchStart: number;
+      note: NoteLine;
+    }>
   >();
   for (const note of notes) {
     NUMERIC_CLAIM_RE.lastIndex = 0;
@@ -61,6 +79,7 @@ export function scanNumericClaimIssues(notes: NoteLine[]): Issue[] {
         noun,
         num: m[1],
         matchText: m[0].trim(),
+        matchStart: m.index,
         note,
       };
       const list = groups.get(noun) ?? [];
@@ -76,10 +95,19 @@ export function scanNumericClaimIssues(notes: NoteLine[]): Issue[] {
     const claims: Claim[] = entries.map((e) => {
       const colon = e.note.text.indexOf(":");
       const prefix = colon > 0 && colon < 40 ? e.note.text.slice(0, colon).trim() : null;
+      const line = linesByPage.get(e.note.page)?.[e.note.lineNumber];
       return {
         label: prefix ?? `Page ${e.note.page} note`,
         value: e.matchText,
-        evidence: { page: e.note.page, sourceText: e.note.text },
+        evidence: {
+          page: e.note.page,
+          sourceText: e.note.text,
+          // Pin to this match's own occurrence — "14 pallets" and
+          // "16 pallets" must not both land on the first number found.
+          rect: line
+            ? locateRect(line, e.matchStart, e.matchText.length, e.matchText)
+            : undefined,
+        },
       };
     });
     const listed = claims
