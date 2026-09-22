@@ -135,4 +135,62 @@ describe("parsePageLines", () => {
     expect(parsed.rows).toHaveLength(1);
     expect(parsed.rows[0].cells[0]).toBe("3");
   });
+
+  test("arbitrary text without meta or table gets no section title", () => {
+    const textLine = (y: number, text: string): PageLine => ({
+      y,
+      text,
+      tokens: text
+        .split(" ")
+        .map((str, i) => ({ str, x: i * 20, y, width: 10, fontSize: 10 })),
+    });
+    // Before the table-presence gate, the second line ("Thank you ...")
+    // was promoted to section title on every such page.
+    const parsed = parsePageLines(1, [
+      textLine(100, "Dear Sir,"),
+      textLine(90, "Thank you for your letter."),
+      textLine(80, "Kind regards,"),
+    ]);
+    expect(parsed.sectionTitle).toBeNull();
+    expect(parsed.titleLineNumber).toBeNull();
+    expect(parsed.meta).toHaveLength(0);
+    expect(parsed.rows).toHaveLength(0);
+  });
+
+  test("meta-less table page still keeps its genuine title", () => {
+    const pack = (y: number, text: string, strs: string[]): PageLine => ({
+      y,
+      text,
+      tokens: strs.map((str, i) => ({
+        str,
+        x: i * 20,
+        y,
+        width: 10,
+        fontSize: 10,
+      })),
+    });
+    const parsed = parsePageLines(1, [
+      pack(100, "Example Co", ["Example", "Co"]),
+      pack(90, "Packing List", ["Packing", "List"]),
+      pack(80, "Item Description Qty Unit Unit Price Line Total", [
+        "Item",
+        "Description",
+        "Qty",
+        "Unit",
+        "Unit Price",
+        "Line Total",
+      ]),
+      pack(70, "1 Widget 2 ea $10.00 $20.00", [
+        "1",
+        "Widget",
+        "2",
+        "ea",
+        "$10.00",
+        "$20.00",
+      ]),
+    ]);
+    expect(parsed.sectionTitle).toBe("Packing List");
+    expect(parsed.titleLineNumber).toBe(1);
+    expect(parsed.rows).toHaveLength(1);
+  });
 });

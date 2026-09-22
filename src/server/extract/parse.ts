@@ -110,19 +110,24 @@ export function parsePageLines(
   });
 
   // Section title: the line just before the first meta line.
-  // Without meta lines, only accept line 1 as a title if it cannot be a
-  // table header, a separator, or a data row.
+  // Without meta lines, only accept line 1 as a title when the page
+  // actually contains an items table — otherwise the second line of any
+  // arbitrary document would be promoted to a heading — and when it cannot
+  // be a table header, a separator, or a data row.
   let titleIndex = -1;
   if (firstMetaIndex >= 1) {
     titleIndex = firstMetaIndex - 1;
   } else if (lines.length > 1) {
-    const candidate = lines[1];
-    const candidateText = textOf(candidate);
-    const looksStructural =
-      isTableHeader(cellsOf(candidate)) ||
-      isSeparator(candidateText) ||
-      /^\d/.test(candidateText);
-    if (!looksStructural) titleIndex = 1;
+    const hasTable = lines.some((line) => isTableHeader(cellsOf(line)));
+    if (hasTable) {
+      const candidate = lines[1];
+      const candidateText = textOf(candidate);
+      const looksStructural =
+        isTableHeader(cellsOf(candidate)) ||
+        isSeparator(candidateText) ||
+        /^\d/.test(candidateText);
+      if (!looksStructural) titleIndex = 1;
+    }
   }
   let sectionTitle: string | null = null;
   if (titleIndex >= 0) {
