@@ -91,10 +91,16 @@ try {
       "application/pdf",
     );
     check("KBS-10234 -> 200", res.status === 200, `status=${res.status}`);
+    const itemCount = payload?.pages?.flatMap((p) => p.items)?.length;
     check(
       "KBS-10234 -> 5 items",
-      payload?.items?.length === 5,
-      `items=${payload?.items?.length}`,
+      itemCount === 5,
+      `items=${itemCount}`,
+    );
+    check(
+      "KBS-10234 -> per-page document fields",
+      payload?.pages?.[0]?.fields?.documentNumber?.value === "KBS-10234",
+      `documentNumber=${payload?.pages?.[0]?.fields?.documentNumber?.value}`,
     );
   }
 
@@ -107,10 +113,13 @@ try {
       "application/pdf",
     );
     check("KBS-10241 -> 200", res.status === 200, `status=${res.status}`);
+    const refusalCodes = payload?.pages?.flatMap((p) => p.refusals)?.map(
+      (r) => r.code,
+    );
     check(
       "KBS-10241 -> page_no_text refusal",
-      payload?.refusals?.some((r) => r.code === "page_no_text") === true,
-      `refusals=${JSON.stringify(payload?.refusals?.map((r) => r.code))}`,
+      refusalCodes?.some((c) => c === "page_no_text") === true,
+      `refusals=${JSON.stringify(refusalCodes)}`,
     );
   }
 

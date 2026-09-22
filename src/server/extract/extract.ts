@@ -28,6 +28,7 @@ import {
   type Issue,
   type LineItem,
   type Refusal,
+  type ResultPage,
 } from "./types";
 
 type MetaKey = "documentNumber" | "date" | "deliveredTo" | "orderedBy";
@@ -38,6 +39,18 @@ const META_KEYS: MetaKey[] = [
   "deliveredTo",
   "orderedBy",
 ];
+
+// Per-page accumulator: every page of the document keeps its own heading,
+// meta fields, total, items, and refusals instead of collapsing to one
+// document-level record.
+type PageBuild = {
+  pageNumber: number;
+  sectionTitle?: FieldValue;
+  fields: DocumentFields;
+  total?: FieldValue;
+  items: LineItem[];
+  refusals: Refusal[];
+};
 
 function detectDocType(sectionTitle: string | null): "packing_list" | "delivery_docket" | "unknown" {
   if (!sectionTitle) return "unknown";
@@ -50,30 +63,37 @@ export function buildExtraction(
   doc: DocumentLoadResult,
   fileName: string,
 ): ExtractionResult {
-  const refusals: Refusal[] = [];
   const issues: Issue[] = [];
   const parsed: ParsedPage[] = [];
 
+  const pageBuilds = new Map<number, PageBuild>();
+  const buildOf = (pageNumber: number): PageBuild => {
+    let build = pageBuilds.get(pageNumber);
+    if (!build) {
+      build = { pageNumber, fields: {}, items: [], refusals: [] };
+      pageBuilds.set(pageNumber, build);
+    }
+    return build;
+  };
+
+  const metaClaims: MetaClaim[] = [];
+  const totalClaims: Array<{ page: number; field: FieldValue }> = [];
+  const notes: NoteLine[] = [];
+  let firstSectionTitle: string | null = null;
+
   for (const page of doc.pages) {
     if (page.status === "no_text") {
-      refusals.push(pageNoTextRefusal(page.pageNumber));
+      buildOf(page.pageNumber).refusals.push(
+        pageNoTextRefusal(page.pageNumber),
+      );
     } else if (page.status === "error") {
-      refusals.push(pageErrorRefusal(page.pageNumber, page.message));
+      buildOf(page.pageNumber).refusals.push(
+        pageErrorRefusal(page.pageNumber, page.message),
+      );
     } else {
       parsed.push(parsePageLines(page.pageNumber, page.lines));
     }
   }
-
-  const items: LineItem[] = [];
-  const fields: DocumentFields = {};
-  const metaClaims: MetaClaim[] = [];
-  const totalClaims: FieldValue[] = [];
-  const notes: NoteLine[] = [];
-  let firstSectionTitle: {
-    value: string;
-    page: number;
-    lineNumber: number | null;
-  } | null = null;
 
   // Raw page lines keyed by page, so every evidence box can be pinned to the
   // exact tokens it was read from (parsed rows keep lineNumber indices).
@@ -91,13 +111,20 @@ export function buildExtraction(
   };
 
   for (const page of parsed) {
+    const build = buildOf(page.pageNumber);
     const section = page.sectionTitle ?? `Page ${page.pageNumber}`;
 
     if (page.sectionTitle && firstSectionTitle === null) {
-      firstSectionTitle = {
+      firstSectionTitle = page.sectionTitle;
+    }
+    if (page.sectionTitle && page.titleLineNumber !== null) {
+      build.sectionTitle = {
         value: page.sectionTitle,
-        page: page.pageNumber,
-        lineNumber: page.titleLineNumber,
+        evidence: {
+          page: page.pageNumber,
+          sourceText: page.sectionTitle,
+          rect: wholeLineRect(page.pageNumber, page.titleLineNumber),
+        },
       };
     }
 
@@ -123,7 +150,9 @@ export function buildExtraction(
       const hasPrice = fieldNames.includes("unitPrice");
       const hasTotal = fieldNames.includes("lineTotal");
       if (hasQty && hasPrice && !hasTotal && page.rows.length > 0) {
-        refusals.push(wouldRequireComputationRefusal(page.pageNumber, section));
+        build.refusals.push(
+          wouldRequireComputationRefusal(page.pageNumber, section),
+        );
       }
 
       for (const row of page.rows) {
@@ -149,7 +178,7 @@ export function buildExtraction(
         });
 
         if (!record.description) {
-          refusals.push(
+          build.refusals.push(
             badRowRefusal(
               page.pageNumber,
               section,
@@ -175,7 +204,7 @@ export function buildExtraction(
           ...(record.unitPrice ? { unitPrice: record.unitPrice } : {}),
           ...(record.lineTotal ? { lineTotal: record.lineTotal } : {}),
         };
-        items.push(item);
+        build.items.push(item);
 
         if (item.quantity && item.unitPrice && item.lineTotal) {
           const issue = rowArithmeticIssue(
@@ -191,7 +220,7 @@ export function buildExtraction(
     }
 
     for (const bad of page.badRows) {
-      refusals.push(
+      build.refusals.push(
         badRowRefusal(
           page.pageNumber,
           section,
@@ -214,7 +243,7 @@ export function buildExtraction(
         const amountTokens = rest.match(/-?\$?\d[\d,]*(?:\.\d+)?/g) ?? [];
         const distinctAmounts = [...new Set(amountTokens)];
         if (distinctAmounts.length >= 2) {
-          refusals.push(
+          build.refusals.push(
             ambiguousReferenceRefusal(
               page.pageNumber,
               distinctAmounts,
@@ -233,17 +262,20 @@ export function buildExtraction(
             totalLine.index + totalLine[0].length - raw.length + leading;
           const totalLineRef = lineOf(page.pageNumber, other.lineNumber);
           totalClaims.push({
-            value: rest,
-            evidence: {
-              page: page.pageNumber,
-              sourceText: other.text,
-              rect: totalLineRef
-                ? locateRect(totalLineRef, valueStart, rest.length, rest)
-                : undefined,
+            page: page.pageNumber,
+            field: {
+              value: rest,
+              evidence: {
+                page: page.pageNumber,
+                sourceText: other.text,
+                rect: totalLineRef
+                  ? locateRect(totalLineRef, valueStart, rest.length, rest)
+                  : undefined,
+              },
             },
           });
         } else {
-          refusals.push(
+          build.refusals.push(
             valueNotStatedRefusal(
               page.pageNumber,
               "total",
@@ -262,7 +294,7 @@ export function buildExtraction(
         const label = labelledTotal[1].trim().toLowerCase();
         const rest = labelledTotal[2].trim();
         if (parseLeadingAmount(rest) === null) {
-          refusals.push(
+          build.refusals.push(
             valueNotStatedRefusal(
               page.pageNumber,
               label,
@@ -276,75 +308,100 @@ export function buildExtraction(
     }
   }
 
-  // Document-level meta: single distinct value wins; conflicts become
-  // contradictions and the field is left unset (never quietly picked).
+  // Meta resolution per key: unanimous across pages → every claiming page
+  // keeps its own copy; divergent values → one contradiction issue and no
+  // page keeps the field (never quietly picked).
   for (const key of META_KEYS) {
     const claims = metaClaims.filter((c) => c.key === key);
     if (claims.length === 0) continue;
     const distinct = new Set(claims.map((c) => c.value));
     if (distinct.size === 1) {
-      fields[key] = {
-        value: claims[0].value,
-        evidence: {
-          page: claims[0].page,
-          sourceText: claims[0].sourceText,
-          rect: claims[0].rect,
-        },
-      };
+      for (const claim of claims) {
+        const build = buildOf(claim.page);
+        if (!build.fields[key]) {
+          build.fields[key] = {
+            value: claim.value,
+            evidence: {
+              page: claim.page,
+              sourceText: claim.sourceText,
+              rect: claim.rect,
+            },
+          };
+        }
+      }
     } else {
       issues.push(metaContradictionIssue(key, claims));
     }
   }
 
-  if (firstSectionTitle) {
-    fields.sectionTitle = {
-      value: firstSectionTitle.value,
-      evidence: {
-        page: firstSectionTitle.page,
-        sourceText: firstSectionTitle.value,
-        rect:
-          firstSectionTitle.lineNumber !== null
-            ? wholeLineRect(firstSectionTitle.page, firstSectionTitle.lineNumber)
-            : undefined,
-      },
-    };
-  }
-
-  if (totalClaims.length > 0) {
-    fields.total = totalClaims[0];
+  // One total per page: the first total claim on that page wins.
+  for (const { page, field } of totalClaims) {
+    const build = buildOf(page);
+    if (!build.total) build.total = field;
   }
 
   issues.push(...scanNumericClaimIssues(notes, linesByPage));
 
-  if (fields.total) {
-    const lineTotals = items
-      .map((i) => i.lineTotal)
-      .filter((lt): lt is FieldValue => lt !== undefined);
-    const mismatch = totalMismatchIssue(fields.total, lineTotals);
-    if (mismatch) issues.push(mismatch);
+  // A stated total is checked against its own page's line totals only —
+  // each page/section of a multi-page document stands on its own.
+  for (const build of pageBuilds.values()) {
+    if (build.total) {
+      const lineTotals = build.items
+        .map((i) => i.lineTotal)
+        .filter((lt): lt is FieldValue => lt !== undefined);
+      const mismatch = totalMismatchIssue(build.total, lineTotals);
+      if (mismatch) issues.push(mismatch);
+    }
   }
 
-  issues.push(...collectDerivedLineTotals(items));
+  const allItems = [...pageBuilds.values()].flatMap((build) => build.items);
+  issues.push(...collectDerivedLineTotals(allItems));
 
+  // Every page 1..pageCount appears, even image-only ones (shell + refusal).
+  const pages: ResultPage[] = Array.from(
+    { length: doc.pageCount },
+    (_, index) => {
+      const build = pageBuilds.get(index + 1);
+      return {
+        pageNumber: index + 1,
+        ...(build?.sectionTitle ? { sectionTitle: build.sectionTitle } : {}),
+        fields: build?.fields ?? {},
+        ...(build?.total ? { total: build.total } : {}),
+        items: build?.items ?? [],
+        refusals: build?.refusals ?? [],
+      };
+    },
+  );
   const raw = {
     document: {
       fileName,
       pageCount: doc.pageCount,
-      docType: detectDocType(firstSectionTitle?.value ?? null),
-      fields,
+      docType: detectDocType(firstSectionTitle),
     },
-    items,
-    refusals,
+    pages,
     issues,
   };
 
   const verified = verifyTraceability(extractionResultSchema.parse(raw));
-  const withViolations = {
-    ...verified.result,
-    refusals: [...verified.result.refusals, ...verified.violations],
-  };
+  // Violations carry their own scope.page — route each back onto its page
+  // (first page as an unreachable-from-our-builder fallback, never dropped).
+  const verifiedPages = verified.result.pages.map((page) => ({
+    ...page,
+    refusals: [...page.refusals],
+  }));
+  const verifiedByPage = new Map(
+    verifiedPages.map((page) => [page.pageNumber, page]),
+  );
+  for (const violation of verified.violations) {
+    const target =
+      verifiedByPage.get(violation.scope.page) ?? verifiedPages[0];
+    target?.refusals.push(violation);
+  }
 
-  return extractionResultSchema.parse(withViolations);
+  return extractionResultSchema.parse({
+    ...verified.result,
+    pages: verifiedPages,
+  });
 }
 
 export async function extractFromPdf(

@@ -71,8 +71,6 @@ export const documentFieldsSchema = z.object({
   date: fieldValueSchema.optional(),
   deliveredTo: fieldValueSchema.optional(),
   orderedBy: fieldValueSchema.optional(),
-  sectionTitle: fieldValueSchema.optional(),
-  total: fieldValueSchema.optional(),
 });
 export type DocumentFields = z.infer<typeof documentFieldsSchema>;
 
@@ -80,7 +78,6 @@ export const documentInfoSchema = z.object({
   fileName: z.string(),
   pageCount: z.number().int().nonnegative(),
   docType: z.enum(["packing_list", "delivery_docket", "unknown"]),
-  fields: documentFieldsSchema,
 });
 export type DocumentInfo = z.infer<typeof documentInfoSchema>;
 
@@ -118,10 +115,23 @@ export const issueSchema = z.discriminatedUnion("code", [
 ]);
 export type Issue = z.infer<typeof issueSchema>;
 
-export const extractionResultSchema = z.object({
-  document: documentInfoSchema,
+export const resultPageSchema = z.object({
+  pageNumber: z.number().int().positive(),
+  // The page's own heading (section title), when the page has one.
+  sectionTitle: fieldValueSchema.optional(),
+  // Meta fields resolved for this page alone — a multi-page document
+  // repeats its Document No / Date on every page, and each page keeps
+  // its own copy instead of collapsing to one document-level value.
+  fields: documentFieldsSchema,
+  total: fieldValueSchema.optional(),
   items: z.array(lineItemSchema),
   refusals: z.array(refusalSchema),
+});
+export type ResultPage = z.infer<typeof resultPageSchema>;
+
+export const extractionResultSchema = z.object({
+  document: documentInfoSchema,
+  pages: z.array(resultPageSchema),
   issues: z.array(issueSchema),
 });
 export type ExtractionResult = z.infer<typeof extractionResultSchema>;

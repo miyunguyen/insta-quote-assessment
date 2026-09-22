@@ -7,7 +7,7 @@ import { verifyTraceability } from "@/server/extract/verify";
 import {
   evidenceContains,
 } from "@/server/extract/normalize";
-import type { ExtractionResult, FieldValue } from "@/server/extract/types";
+import type { ExtractionResult, FieldValue, LineItem, Refusal } from "@/server/extract/types";
 
 const samplesDir = path.resolve(process.cwd(), "sample-files-variant-A");
 
@@ -44,22 +44,34 @@ const HEADER = [
   "Line Total",
 ];
 
+function allItems(result: ExtractionResult): LineItem[] {
+  return result.pages.flatMap((page) => page.items);
+}
+
+function allRefusals(result: ExtractionResult): Refusal[] {
+  return result.pages.flatMap((page) => page.refusals);
+}
+
 function allFieldValues(result: ExtractionResult): FieldValue[] {
   const out: FieldValue[] = [];
-  for (const fv of Object.values(result.document.fields)) {
-    if (fv) out.push(fv);
-  }
-  for (const item of result.items) {
-    for (const key of [
-      "description",
-      "quantity",
-      "unit",
-      "weight",
-      "unitPrice",
-      "lineTotal",
-    ] as const) {
-      const fv = item[key];
+  for (const page of result.pages) {
+    if (page.sectionTitle) out.push(page.sectionTitle);
+    for (const fv of Object.values(page.fields)) {
       if (fv) out.push(fv);
+    }
+    if (page.total) out.push(page.total);
+    for (const item of page.items) {
+      for (const key of [
+        "description",
+        "quantity",
+        "unit",
+        "weight",
+        "unitPrice",
+        "lineTotal",
+      ] as const) {
+        const fv = item[key];
+        if (fv) out.push(fv);
+      }
     }
   }
   return out;
@@ -68,41 +80,57 @@ function allFieldValues(result: ExtractionResult): FieldValue[] {
 describe("refusal rules on real samples", () => {
   test("image-only document: everything refused, nothing invented", async () => {
     const result = await extractSample("KBS-10241.pdf");
-    expect(result.items).toHaveLength(0);
-    expect(result.refusals).toHaveLength(1);
-    expect(result.refusals[0].code).toBe("page_no_text");
-    expect(result.refusals[0].scope.page).toBe(1);
-    expect(result.refusals[0].plainLanguage).toContain("image");
+    expect(allItems(result)).toHaveLength(0);
+    const refusals = allRefusals(result);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0].code).toBe("page_no_text");
+    expect(refusals[0].scope.page).toBe(1);
+    expect(refusals[0].plainLanguage).toContain("image");
     expect(result.document.pageCount).toBe(1);
+    // the image-only page still appears in pages, as a shell with its refusal
+    expect(result.pages).toHaveLength(1);
+    expect(result.pages[0].refusals).toHaveLength(1);
   });
 
   test("DR118: refusal for page 4 only; other 7 pages still yield items", async () => {
     const result = await extractSample("KBS-DR118.pdf");
-    expect(result.refusals).toHaveLength(1);
-    expect(result.refusals[0].code).toBe("page_no_text");
-    expect(result.refusals[0].scope.page).toBe(4);
-    expect(result.items).toHaveLength(21);
-    const sections = new Set(result.items.map((i) => i.section));
+    expect(result.pages).toHaveLength(8);
+    const refusals = allRefusals(result);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0].code).toBe("page_no_text");
+    expect(refusals[0].scope.page).toBe(4);
+    expect(result.pages[3].items).toHaveLength(0);
+    expect(result.pages[3].refusals).toHaveLength(1);
+    const items = allItems(result);
+    expect(items).toHaveLength(21);
+    const sections = new Set(items.map((i) => i.section));
     expect(sections.size).toBe(7);
-    expect(result.document.fields.documentNumber?.value).toBe("KBS-DR118");
+    // every readable page keeps its own copy of the repeated meta
+    const numbered = result.pages.filter((p) => p.fields.documentNumber);
+    expect(numbered).toHaveLength(7);
+    for (const page of numbered) {
+      expect(page.fields.documentNumber?.value).toBe("KBS-DR118");
+      expect(page.fields.date?.value).toBe("24 August 2026");
+    }
     expect(result.issues).toHaveLength(0);
   });
 
   test("KBS-10255: no line totals computed into items; refusal + derived cross-checks in issues", async () => {
     const result = await extractSample("KBS-10255.pdf");
-    expect(result.items).toHaveLength(4);
-    for (const item of result.items) {
+    const items = allItems(result);
+    expect(items).toHaveLength(4);
+    for (const item of items) {
       expect(item.lineTotal).toBeUndefined();
       expect(item.quantity).toBeDefined();
       expect(item.unitPrice).toBeDefined();
     }
-    const compRefusal = result.refusals.find(
+    const compRefusal = allRefusals(result).find(
       (r) => r.code === "would_require_computation",
     );
     expect(compRefusal).toBeDefined();
     expect(compRefusal?.scope.field).toBe("lineTotal");
 
-    const weightRefusal = result.refusals.find(
+    const weightRefusal = allRefusals(result).find(
       (r) => r.code === "value_not_stated",
     );
     expect(weightRefusal?.evidence?.sourceText).toContain(
@@ -122,7 +150,7 @@ describe("refusal rules on real samples", () => {
     // No derived line total may leak into items or document fields
     const raw = JSON.stringify({
       document: result.document,
-      items: result.items,
+      pages: result.pages,
     });
     expect(raw).not.toContain("$272.00");
   });
@@ -144,13 +172,13 @@ describe("refusal rules on real samples", () => {
     expect(result.issues.some((i) => i.code === "arithmetic_mismatch")).toBe(
       false,
     );
-    expect(result.document.fields.total?.value).toBe("$5,122.40");
+    expect(result.pages[0].total?.value).toBe("$5,122.40");
   });
 
   test("KBS-10270: stated total kept, mismatch flagged, no invented reconciling number", async () => {
     const result = await extractSample("KBS-10270.pdf");
-    expect(result.document.fields.total?.value).toBe("$1,612.90");
-    expect(result.document.fields.total?.evidence.sourceText).toContain(
+    expect(result.pages[0].total?.value).toBe("$1,612.90");
+    expect(result.pages[0].total?.evidence.sourceText).toContain(
       "$1,612.90",
     );
     const mismatch = result.issues.find((i) => i.code === "arithmetic_mismatch");
@@ -161,7 +189,7 @@ describe("refusal rules on real samples", () => {
     expect(mismatch.derived.operands).toHaveLength(4);
     expect(mismatch.plainLanguage).toContain("doesn't equal");
     // each stated line total remains individually extracted with evidence
-    const totals = result.items
+    const totals = allItems(result)
       .map((i) => i.lineTotal?.value)
       .filter(Boolean);
     expect(totals).toEqual(["$936.00", "$160.20", "$64.00", "$378.00"]);
@@ -169,10 +197,10 @@ describe("refusal rules on real samples", () => {
 
   test("KBS-10234: clean document has no refusals and no issues", async () => {
     const result = await extractSample("KBS-10234.pdf");
-    expect(result.refusals).toHaveLength(0);
+    expect(allRefusals(result)).toHaveLength(0);
     expect(result.issues).toHaveLength(0);
-    expect(result.items).toHaveLength(5);
-    expect(result.document.fields.total?.value).toBe("$2,630.00");
+    expect(allItems(result)).toHaveLength(5);
+    expect(result.pages[0].total?.value).toBe("$2,630.00");
     expect(result.document.docType).toBe("packing_list");
   });
 });
@@ -225,8 +253,8 @@ describe("refusal rules on synthetic pages", () => {
       ]),
     );
     const result = buildExtraction(doc, "synthetic.pdf");
-    expect(result.items).toHaveLength(2);
-    const refusal = result.refusals.find((r) => r.code === "unreadable_value");
+    expect(allItems(result)).toHaveLength(2);
+    const refusal = allRefusals(result).find((r) => r.code === "unreadable_value");
     expect(refusal).toBeDefined();
     expect(refusal?.evidence?.sourceText).toBe("2 Broken row");
     expect(refusal?.plainLanguage).toContain("didn't match");
@@ -246,23 +274,27 @@ describe("refusal rules on synthetic pages", () => {
     );
     const result = buildExtraction(doc, "synthetic.pdf");
     // Tamper: value no longer present in its evidence text
-    const original = result.document.fields.documentNumber;
+    const original = result.pages[0].fields.documentNumber;
     expect(original).toBeDefined();
     const tampered: ExtractionResult = {
       ...result,
-      document: {
-        ...result.document,
-        fields: {
-          ...result.document.fields,
-          documentNumber: {
-            value: "FAKE-999",
-            evidence: original!.evidence,
-          },
-        },
-      },
+      pages: result.pages.map((page, index) =>
+        index === 0
+          ? {
+              ...page,
+              fields: {
+                ...page.fields,
+                documentNumber: {
+                  value: "FAKE-999",
+                  evidence: original!.evidence,
+                },
+              },
+            }
+          : page,
+      ),
     };
     const verified = verifyTraceability(tampered);
-    expect(verified.result.document.fields.documentNumber).toBeUndefined();
+    expect(verified.result.pages[0].fields.documentNumber).toBeUndefined();
     expect(verified.violations).toHaveLength(1);
     expect(verified.violations[0].plainLanguage).toContain(
       "removed rather than reported",
@@ -283,7 +315,7 @@ describe("refusal rules on synthetic pages", () => {
     );
     const result = buildExtraction(doc, "synthetic.pdf");
     // stated line total still extracted (it has a source)
-    expect(result.items[0].lineTotal?.value).toBe("$99.00");
+    expect(result.pages[0].items[0].lineTotal?.value).toBe("$99.00");
     const mismatch = result.issues.find((i) => i.code === "arithmetic_mismatch");
     expect(mismatch).toBeDefined();
     if (mismatch?.code !== "arithmetic_mismatch") throw new Error("wrong code");
@@ -303,9 +335,33 @@ describe("refusal rules on synthetic pages", () => {
       ]);
     const doc = syntheticDoc(pageWith("AAA-1", 1), pageWith("BBB-2", 2));
     const result = buildExtraction(doc, "synthetic.pdf");
-    expect(result.document.fields.documentNumber).toBeUndefined();
+    expect(
+      result.pages.every((p) => p.fields.documentNumber === undefined),
+    ).toBe(true);
     const contradiction = result.issues.find((i) => i.code === "contradiction");
     expect(contradiction?.code === "contradiction" && contradiction.claims).toHaveLength(2);
-    expect(result.items).toHaveLength(2);
+    expect(allItems(result)).toHaveLength(2);
+  });
+
+  test("agreeing document numbers across pages: each page keeps its own copy", () => {
+    const pageWith = (pageNumber: number): PageResult =>
+      okPage(pageNumber, [
+        line(900, ["Example Co"]),
+        line(880, ["Packing List"]),
+        line(860, ["Document No: SAME-1"]),
+        line(800, HEADER),
+        line(795, ["-".repeat(60)]),
+        line(780, ["1", "Widget", "2", "ea", "$10.00", "$20.00"]),
+      ]);
+    const doc = syntheticDoc(pageWith(1), pageWith(2));
+    const result = buildExtraction(doc, "synthetic.pdf");
+    expect(result.pages).toHaveLength(2);
+    for (const page of result.pages) {
+      expect(page.fields.documentNumber?.value).toBe("SAME-1");
+      expect(page.fields.documentNumber?.evidence.page).toBe(page.pageNumber);
+    }
+    expect(
+      result.issues.some((i) => i.code === "contradiction"),
+    ).toBe(false);
   });
 });

@@ -1,4 +1,12 @@
-import type { ExtractionResult, LineItem } from "@/server/extract/types";
+import type {
+  DocumentFields,
+  ExtractionResult,
+  FieldValue,
+  Issue,
+  LineItem,
+  Refusal,
+  ResultPage,
+} from "@/server/extract/types";
 import { EvidenceButton } from "./EvidenceButton";
 
 type EvidencePlumbing = {
@@ -31,141 +39,173 @@ function SectionHeader({ title, count }: { title: string; count: number }) {
   );
 }
 
-function ItemsBySection({
+function ItemsTable({
   items,
   pdfUrl,
   pageCount,
 }: { items: LineItem[] } & EvidencePlumbing) {
-  const sections = new Map<string, LineItem[]>();
-  for (const item of items) {
-    const list = sections.get(item.section) ?? [];
-    list.push(item);
-    sections.set(item.section, list);
-  }
-
   return (
-    <div className="space-y-8">
-      {[...sections.entries()].map(([section, sectionItems]) => (
-        <section key={section}>
-          <SectionHeader title={section} count={sectionItems.length} />
-          <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
-            <table className="w-full border-collapse text-left">
-              <thead>
-                <tr className="border-b border-neutral-200 bg-neutral-50 text-xs uppercase tracking-wide text-neutral-600">
-                  <th className="px-4 py-2.5 font-medium">Description</th>
-                  {FIELD_LABELS.map(({ key, label }) => (
-                    <th key={key} className="px-4 py-2.5 font-medium">
-                      {label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sectionItems.map((item, index) => (
-                  <tr
-                    key={`${section}-${index}`}
-                    className="border-b border-neutral-100 last:border-0"
-                  >
-                    <td className="max-w-xs px-4 py-3">
-                      <div className="text-[15px] text-neutral-900">
-                        {item.description.value}
-                      </div>
-                      <div className="mt-1.5">
-                        <EvidenceButton
-                          page={item.description.evidence.page}
-                          sourceText={item.description.evidence.sourceText}
-                          rect={item.description.evidence.rect}
-                          pdfUrl={pdfUrl}
-                          pageCount={pageCount}
-                          label="Description"
-                        />
-                      </div>
+    <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
+      <table className="w-full border-collapse text-left">
+        <thead>
+          <tr className="border-b border-neutral-200 bg-neutral-50 text-xs uppercase tracking-wide text-neutral-600">
+            <th className="px-4 py-2.5 font-medium">Description</th>
+            {FIELD_LABELS.map(({ key, label }) => (
+              <th key={key} className="px-4 py-2.5 font-medium">
+                {label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, index) => (
+            <tr
+              key={index}
+              className="border-b border-neutral-100 last:border-0"
+            >
+              <td className="max-w-xs px-4 py-3">
+                <div className="text-[15px] text-neutral-900">
+                  {item.description.value}
+                </div>
+                <div className="mt-1.5">
+                  <EvidenceButton
+                    page={item.description.evidence.page}
+                    sourceText={item.description.evidence.sourceText}
+                    rect={item.description.evidence.rect}
+                    pdfUrl={pdfUrl}
+                    pageCount={pageCount}
+                    label="Description"
+                  />
+                </div>
+              </td>
+              {FIELD_LABELS.map(({ key, label }) => {
+                const field = item[key];
+                if (!field) {
+                  return (
+                    <td
+                      key={key}
+                      className="px-4 py-3 align-top text-sm italic text-neutral-400"
+                    >
+                      not stated
                     </td>
-                    {FIELD_LABELS.map(({ key, label }) => {
-                      const field = item[key];
-                      if (!field) {
-                        return (
-                          <td
-                            key={key}
-                            className="px-4 py-3 align-top text-sm italic text-neutral-400"
-                          >
-                            not stated
-                          </td>
-                        );
-                      }
-                      return (
-                        <td key={key} className="px-4 py-3 align-top">
-                          <div className="font-mono text-[15px] text-neutral-900">
-                            {field.value}
-                          </div>
-                          <div className="mt-1.5">
-                            <EvidenceButton
-                              page={field.evidence.page}
-                              sourceText={field.evidence.sourceText}
-                              rect={field.evidence.rect}
-                              pdfUrl={pdfUrl}
-                              pageCount={pageCount}
-                              label={label}
-                            />
-                          </div>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ))}
+                  );
+                }
+                return (
+                  <td key={key} className="px-4 py-3 align-top">
+                    <div className="font-mono text-[15px] text-neutral-900">
+                      {field.value}
+                    </div>
+                    <div className="mt-1.5">
+                      <EvidenceButton
+                        page={field.evidence.page}
+                        sourceText={field.evidence.sourceText}
+                        rect={field.evidence.rect}
+                        pdfUrl={pdfUrl}
+                        pageCount={pageCount}
+                        label={label}
+                      />
+                    </div>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
-function DocumentMeta({
-  document,
+const PAGE_FIELD_LABELS: Array<{ key: keyof DocumentFields; label: string }> = [
+  { key: "documentNumber", label: "Document No" },
+  { key: "date", label: "Date" },
+  { key: "deliveredTo", label: "Delivered to" },
+  { key: "orderedBy", label: "Ordered by" },
+];
+
+function PageDocument({
+  page,
   pdfUrl,
   pageCount,
 }: {
-  document: ExtractionResult["document"];
+  page: ResultPage;
 } & EvidencePlumbing) {
-  const entries = Object.entries(document.fields).filter(
-    (entry): entry is [string, NonNullable<(typeof entry)[1]>] =>
-      entry[1] !== undefined,
-  );
-  if (entries.length === 0) return null;
+  const lines: Array<{ label: string; field: FieldValue }> = [];
+  for (const { key, label } of PAGE_FIELD_LABELS) {
+    const field = page.fields[key];
+    if (field) lines.push({ label, field });
+  }
+  if (page.total) lines.push({ label: "Total", field: page.total });
+  if (!page.sectionTitle && lines.length === 0) return null;
 
   return (
+    <>
+      <h3 className="mb-2 flex items-center gap-2 text-lg font-semibold text-neutral-900">
+        {page.sectionTitle?.value ?? `Page ${page.pageNumber}`}
+        {page.sectionTitle && (
+          <EvidenceButton
+            page={page.sectionTitle.evidence.page}
+            sourceText={page.sectionTitle.evidence.sourceText}
+            rect={page.sectionTitle.evidence.rect}
+            pdfUrl={pdfUrl}
+            pageCount={pageCount}
+            label="Section title"
+          />
+        )}
+      </h3>
+      {lines.map(({ label, field }) => (
+        <div
+          key={label}
+          className="flex items-center gap-2 py-0.5 text-[15px] text-neutral-900"
+        >
+          <span>
+            {label}: <span className="font-mono">{field.value}</span>
+          </span>
+          <EvidenceButton
+            page={field.evidence.page}
+            sourceText={field.evidence.sourceText}
+            rect={field.evidence.rect}
+            pdfUrl={pdfUrl}
+            pageCount={pageCount}
+            label={label}
+          />
+        </div>
+      ))}
+    </>
+  );
+}
+
+function pageHasDocument(page: ResultPage): boolean {
+  return (
+    page.sectionTitle !== undefined ||
+    page.total !== undefined ||
+    Object.values(page.fields).some((field) => field !== undefined)
+  );
+}
+
+// One page's block: its heading + field lines, immediately followed by its
+// own line items — then the next page. Applies to every document type, so a
+// multi-page docket reads page by page instead of headings-first.
+function PageBlock({
+  page,
+  pdfUrl,
+  pageCount,
+}: {
+  page: ResultPage;
+} & EvidencePlumbing) {
+  if (!pageHasDocument(page) && page.items.length === 0) return null;
+  return (
     <section className="mb-8">
-      <SectionHeader title="Document details" count={entries.length} />
-      <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {entries.map(([name, field]) => {
-          const pretty = name.replace(/([A-Z])/g, " $1");
-          return (
-            <div
-              key={name}
-              className="rounded-lg border border-neutral-200 bg-white p-3"
-            >
-              <dt className="text-xs uppercase tracking-wide text-neutral-500">
-                {pretty}
-              </dt>
-              <dd className="mt-1 font-mono text-[15px] text-neutral-900">
-                {field.value}
-              </dd>
-              <dd className="mt-1.5">
-                <EvidenceButton
-                  page={field.evidence.page}
-                  sourceText={field.evidence.sourceText}
-                  rect={field.evidence.rect}
-                  pdfUrl={pdfUrl}
-                  pageCount={pageCount}
-                  label={pretty}
-                />
-              </dd>
-            </div>
-          );
-        })}
-      </dl>
+      <PageDocument page={page} pdfUrl={pdfUrl} pageCount={pageCount} />
+      {page.items.length > 0 && (
+        <div className={pageHasDocument(page) ? "mt-4" : ""}>
+          <ItemsTable
+            items={page.items}
+            pdfUrl={pdfUrl}
+            pageCount={pageCount}
+          />
+        </div>
+      )}
     </section>
   );
 }
@@ -175,7 +215,7 @@ function RefusalsList({
   pdfUrl,
   pageCount,
 }: {
-  refusals: ExtractionResult["refusals"];
+  refusals: Refusal[];
 } & EvidencePlumbing) {
   if (refusals.length === 0) {
     return (
@@ -241,7 +281,7 @@ function IssuesList({
   pdfUrl,
   pageCount,
 }: {
-  issues: ExtractionResult["issues"];
+  issues: Issue[];
 } & EvidencePlumbing) {
   if (issues.length === 0) return null;
   return (
@@ -373,6 +413,8 @@ export function ResultView({
   pdfUrl: string | null;
 }) {
   const pageCount = result.document.pageCount;
+  const items = result.pages.flatMap((page) => page.items);
+  const refusals = result.pages.flatMap((page) => page.refusals);
   return (
     <div>
       <div className="mb-6 flex flex-wrap items-center gap-3 text-[15px] text-neutral-600">
@@ -386,11 +428,11 @@ export function ResultView({
         <span className="capitalize">
           {result.document.docType.replace(/_/g, " ")}
         </span>
-        <span>{result.items.length} line items</span>
-        {result.refusals.length > 0 && (
+        <span>{items.length} line items</span>
+        {refusals.length > 0 && (
           <span className="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-xs text-amber-900">
-            {result.refusals.length} refusal
-            {result.refusals.length === 1 ? "" : "s"}
+            {refusals.length} refusal
+            {refusals.length === 1 ? "" : "s"}
           </span>
         )}
         {result.issues.length > 0 && (
@@ -402,7 +444,7 @@ export function ResultView({
       </div>
 
       <RefusalsList
-        refusals={result.refusals}
+        refusals={refusals}
         pdfUrl={pdfUrl}
         pageCount={pageCount}
       />
@@ -411,18 +453,15 @@ export function ResultView({
         pdfUrl={pdfUrl}
         pageCount={pageCount}
       />
-      <DocumentMeta
-        document={result.document}
-        pdfUrl={pdfUrl}
-        pageCount={pageCount}
-      />
-      {result.items.length > 0 ? (
-        <ItemsBySection
-          items={result.items}
+      {result.pages.map((page) => (
+        <PageBlock
+          key={page.pageNumber}
+          page={page}
           pdfUrl={pdfUrl}
           pageCount={pageCount}
         />
-      ) : (
+      ))}
+      {items.length === 0 && (
         <p className="text-[15px] text-neutral-500">
           No line items were extracted.
         </p>

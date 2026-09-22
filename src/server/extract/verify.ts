@@ -1,6 +1,13 @@
 import { evidenceContains } from "./normalize";
 import { traceabilityRefusal } from "./rules";
-import type { ExtractionResult, Refusal } from "./types";
+import type {
+  DocumentFields,
+  ExtractionResult,
+  FieldValue,
+  LineItem,
+  Refusal,
+  ResultPage,
+} from "./types";
 
 type FieldName = string;
 
@@ -23,26 +30,49 @@ function checkFields<T extends Record<string, { value: string; evidence: { page:
   return out;
 }
 
-export function verifyTraceability(result: ExtractionResult): {
-  result: ExtractionResult;
-  violations: Refusal[];
-} {
-  const violations: Refusal[] = [];
-  const pageCount = result.document.pageCount;
+function checkOptionalField(
+  fieldValue: FieldValue | undefined,
+  owner: string,
+  pageCount: number,
+  onViolation: (field: FieldName, value: string, sourceText: string, page: number) => void,
+): FieldValue | undefined {
+  if (!fieldValue) return undefined;
+  const { value, evidence } = fieldValue;
+  const inBounds = evidence.page >= 1 && evidence.page <= pageCount;
+  if (!inBounds || !evidenceContains(evidence.sourceText, value)) {
+    onViolation(owner, value, evidence.sourceText, evidence.page);
+    return undefined;
+  }
+  return fieldValue;
+}
 
-  const document = {
-    ...result.document,
-    fields: checkFields(
-      result.document.fields,
-      "document",
-      pageCount,
-      (field, value, sourceText, page) =>
-        violations.push(traceabilityRefusal(page, field, value, sourceText)),
-    ),
-  };
+function verifyPage(
+  page: ResultPage,
+  pageCount: number,
+  onViolation: (field: FieldName, value: string, sourceText: string, page: number) => void,
+): ResultPage {
+  const owner = `page ${page.pageNumber}`;
+  const fields: DocumentFields = checkFields(
+    page.fields,
+    owner,
+    pageCount,
+    onViolation,
+  );
+  const sectionTitle = checkOptionalField(
+    page.sectionTitle,
+    `${owner}.sectionTitle`,
+    pageCount,
+    onViolation,
+  );
+  const total = checkOptionalField(
+    page.total,
+    `${owner}.total`,
+    pageCount,
+    onViolation,
+  );
 
-  const items = [];
-  for (const item of result.items) {
+  const items: LineItem[] = [];
+  for (const item of page.items) {
     const copy = { ...item };
     let dropItem = false;
 
@@ -54,13 +84,11 @@ export function verifyTraceability(result: ExtractionResult): {
       evidenceContains(description.evidence.sourceText, description.value);
     if (!descOk) {
       dropItem = true;
-      violations.push(
-        traceabilityRefusal(
-          description.evidence.page,
-          "item.description",
-          description.value,
-          description.evidence.sourceText,
-        ),
+      onViolation(
+        "item.description",
+        description.value,
+        description.evidence.sourceText,
+        description.evidence.page,
       );
     }
 
@@ -72,10 +100,9 @@ export function verifyTraceability(result: ExtractionResult): {
         unitPrice: item.unitPrice,
         lineTotal: item.lineTotal,
       },
-      "item",
+      `${owner}.item`,
       pageCount,
-      (field, value, sourceText, page) =>
-        violations.push(traceabilityRefusal(page, field, value, sourceText)),
+      onViolation,
     );
 
     if (!dropItem) {
@@ -83,8 +110,24 @@ export function verifyTraceability(result: ExtractionResult): {
     }
   }
 
+  return { ...page, sectionTitle, fields, total, items };
+}
+
+export function verifyTraceability(result: ExtractionResult): {
+  result: ExtractionResult;
+  violations: Refusal[];
+} {
+  const violations: Refusal[] = [];
+  const pageCount = result.document.pageCount;
+  const onViolation = (field: FieldName, value: string, sourceText: string, page: number) =>
+    violations.push(traceabilityRefusal(page, field, value, sourceText));
+
+  const pages = result.pages.map((page) =>
+    verifyPage(page, pageCount, onViolation),
+  );
+
   return {
-    result: { ...result, document, items },
+    result: { ...result, pages },
     violations,
   };
 }

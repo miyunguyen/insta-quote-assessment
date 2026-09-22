@@ -55,15 +55,17 @@ describe("refusal code coverage", () => {
       ),
       "partial.pdf",
     );
-    expect(result.refusals).toHaveLength(1);
-    expect(result.refusals[0].code).toBe("page_parse_failed");
-    expect(result.refusals[0].scope.page).toBe(1);
-    expect(result.refusals[0].technicalDetail).toContain(
+    expect(result.pages).toHaveLength(2);
+    const refusals = result.pages.flatMap((p) => p.refusals);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0].code).toBe("page_parse_failed");
+    expect(refusals[0].scope.page).toBe(1);
+    expect(refusals[0].technicalDetail).toContain(
       "Malformed content stream",
     );
     // page 2 still extracted — failure contained
-    expect(result.items).toHaveLength(1);
-    expect(result.document.fields.documentNumber?.value).toBe("TEST-5");
+    expect(result.pages.flatMap((p) => p.items)).toHaveLength(1);
+    expect(result.pages[1].fields.documentNumber?.value).toBe("TEST-5");
   });
 
   test("total line with two different amounts → ambiguous_reference, no total extracted", () => {
@@ -85,10 +87,10 @@ describe("refusal code coverage", () => {
       ),
       "ambiguous.pdf",
     );
-    expect(result.document.fields.total).toBeUndefined();
-    const refusal = result.refusals.find(
-      (r) => r.code === "ambiguous_reference",
-    );
+    expect(result.pages[0].total).toBeUndefined();
+    const refusal = result.pages
+      .flatMap((p) => p.refusals)
+      .find((r) => r.code === "ambiguous_reference");
     expect(refusal).toBeDefined();
     expect(refusal?.evidence?.sourceText).toBe(
       "Total: $100.00 or $95.00",
@@ -96,7 +98,7 @@ describe("refusal code coverage", () => {
     expect(refusal?.plainLanguage).toContain("isn't clear which figure");
     expect(refusal?.plainLanguage).toContain("$100.00, $95.00");
     // the stated line total on the row is untouched
-    expect(result.items[0].lineTotal?.value).toBe("$20.00");
+    expect(result.pages[0].items[0].lineTotal?.value).toBe("$20.00");
   });
 });
 
@@ -122,7 +124,7 @@ describe("refusal messages stay human-readable", () => {
     for (const file of files) {
       const bytes = await readFile(path.join(samplesDir, file));
       const result = await extractFromPdf(new Uint8Array(bytes), file);
-      for (const refusal of result.refusals) {
+      for (const refusal of result.pages.flatMap((p) => p.refusals)) {
         refusalCount += 1;
         expect(refusal.plainLanguage.length).toBeGreaterThanOrEqual(40);
         for (const pattern of genericPatterns) {
@@ -156,51 +158,53 @@ describe("response schema guards the contract", () => {
         fileName: "x.pdf",
         pageCount: 1,
         docType: "unknown",
-        fields: { date: { value: "1 Jan 2026" } },
       },
-      items: [],
-      refusals: [],
+      pages: [
+        {
+          pageNumber: 1,
+          fields: { date: { value: "1 Jan 2026" } },
+          items: [],
+          refusals: [],
+        },
+      ],
       issues: [],
     });
     expect(parsed.success).toBe(false);
   });
 
   test("rejects unknown refusal codes and empty plain-language", () => {
-    const base = {
+    const pageWith = (refusals: unknown) => ({
       document: {
         fileName: "x.pdf",
         pageCount: 1,
         docType: "unknown",
-        fields: {},
       },
-      items: [],
+      pages: [{ pageNumber: 1, fields: {}, items: [], refusals }],
       issues: [],
-    };
+    });
     expect(
-      extractionResultSchema.safeParse({
-        ...base,
-        refusals: [
+      extractionResultSchema.safeParse(
+        pageWith([
           {
             code: "mystery_code",
             scope: { page: 1 },
             plainLanguage: "because",
             technicalDetail: "x",
           },
-        ],
-      }).success,
+        ]),
+      ).success,
     ).toBe(false);
     expect(
-      extractionResultSchema.safeParse({
-        ...base,
-        refusals: [
+      extractionResultSchema.safeParse(
+        pageWith([
           {
             code: "page_no_text",
             scope: { page: 1 },
             plainLanguage: "",
             technicalDetail: "x",
           },
-        ],
-      }).success,
+        ]),
+      ).success,
     ).toBe(false);
   });
 
@@ -210,10 +214,10 @@ describe("response schema guards the contract", () => {
         fileName: "x.pdf",
         pageCount: 1,
         docType: "unknown",
-        fields: {},
       },
-      items: [],
-      refusals: [],
+      pages: [
+        { pageNumber: 1, fields: {}, items: [], refusals: [] },
+      ],
       issues: [
         {
           code: "contradiction",

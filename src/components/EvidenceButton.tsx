@@ -54,11 +54,12 @@ export function EvidenceButton({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        title="View source"
-        aria-label={`View evidence on page ${page} for ${label}: ${sourceText}`}
-        className="inline-flex items-center gap-1.5 rounded-md border border-neutral-300 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 shadow-sm hover:border-neutral-500 hover:text-neutral-900"
+        title={`Show evidence on page ${page}: ${sourceText}`}
+        aria-label={`Show evidence on page ${page} for ${label}: ${sourceText}`}
+        className="inline-flex items-center gap-1 rounded-md border border-neutral-300 bg-white px-1.5 py-1 text-xs font-medium text-neutral-500 shadow-sm hover:border-neutral-500 hover:text-neutral-900"
       >
         <EyeIcon />
+        <span className="font-normal">p{page}</span>
       </button>
       {open && (
         <EvidenceModal
