@@ -38,6 +38,7 @@ export function ItemsTable({
       <table className="w-full border-collapse text-left">
         <thead>
           <tr className="border-b border-neutral-200 bg-neutral-50 text-xs uppercase tracking-wide text-neutral-600">
+            <th className="px-4 py-2.5 font-medium">Item</th>
             <th className="px-4 py-2.5 font-medium">Description</th>
             {FIELD_LABELS.map(({ key, label }) => (
               <th key={key} className="px-4 py-2.5 font-medium">
@@ -52,6 +53,9 @@ export function ItemsTable({
               key={index}
               className="border-b border-neutral-100 last:border-0"
             >
+              <td className="px-4 py-3 align-top font-mono text-[15px] text-neutral-500">
+                {index + 1}
+              </td>
               <td className="max-w-xs px-4 py-3">
                 <div className="text-[15px] text-neutral-900">
                   {item.description.value}
@@ -75,7 +79,7 @@ export function ItemsTable({
                       key={key}
                       className="px-4 py-3 align-top text-sm italic text-neutral-400"
                     >
-                      not stated
+                      N/A
                     </td>
                   );
                 }
