@@ -1,13 +1,5 @@
 import { parseLeadingAmount } from "./normalize";
-import type { PageLine } from "./pdf";
-import { locateRect } from "./rects";
-import type {
-  Claim,
-  EvidenceRect,
-  FieldValue,
-  Issue,
-  LineItem,
-} from "./types";
+import type { EvidenceRect, FieldValue, Issue } from "./types";
 
 export function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -32,12 +24,13 @@ export function metaContradictionIssue(
   key: string,
   claims: MetaClaim[],
 ): Issue {
-  const pretty = {
-    documentNumber: "document number",
-    date: "date",
-    deliveredTo: "delivery address",
-    orderedBy: "order contact",
-  }[key] ?? key;
+  const pretty =
+    {
+      documentNumber: "document number",
+      date: "date",
+      deliveredTo: "delivery address",
+      orderedBy: "order contact",
+    }[key] ?? key;
   const listed = claims
     .map((c) => `"${c.value}" (page ${c.page})`)
     .join(" vs ");
@@ -50,76 +43,6 @@ export function metaContradictionIssue(
       evidence: { page: c.page, sourceText: c.sourceText, rect: c.rect },
     })),
   };
-}
-
-export type NoteLine = { text: string; page: number; lineNumber: number };
-
-const NUMERIC_CLAIM_RE = /(\d+)\s+(pallets?)\b/gi;
-
-export function scanNumericClaimIssues(
-  notes: NoteLine[],
-  linesByPage: Map<number, PageLine[]>,
-): Issue[] {
-  const groups = new Map<
-    string,
-    Array<{
-      noun: string;
-      num: string;
-      matchText: string;
-      matchStart: number;
-      note: NoteLine;
-    }>
-  >();
-  for (const note of notes) {
-    NUMERIC_CLAIM_RE.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = NUMERIC_CLAIM_RE.exec(note.text)) !== null) {
-      const noun = m[2].toLowerCase();
-      const entry = {
-        noun,
-        num: m[1],
-        matchText: m[0].trim(),
-        matchStart: m.index,
-        note,
-      };
-      const list = groups.get(noun) ?? [];
-      list.push(entry);
-      groups.set(noun, list);
-    }
-  }
-
-  const issues: Issue[] = [];
-  for (const [, entries] of groups) {
-    const distinct = new Set(entries.map((e) => e.num));
-    if (distinct.size < 2) continue;
-    const claims: Claim[] = entries.map((e) => {
-      const colon = e.note.text.indexOf(":");
-      const prefix = colon > 0 && colon < 40 ? e.note.text.slice(0, colon).trim() : null;
-      const line = linesByPage.get(e.note.page)?.[e.note.lineNumber];
-      return {
-        label: prefix ?? `Page ${e.note.page} note`,
-        value: e.matchText,
-        evidence: {
-          page: e.note.page,
-          sourceText: e.note.text,
-          // Pin to this match's own occurrence — "14 pallets" and
-          // "16 pallets" must not both land on the first number found.
-          rect: line
-            ? locateRect(line, e.matchStart, e.matchText.length, e.matchText)
-            : undefined,
-        },
-      };
-    });
-    const listed = claims
-      .map((c) => `${c.value} ("${c.label}", page ${c.evidence.page})`)
-      .join(" and ");
-    issues.push({
-      code: "contradiction",
-      plainLanguage: `This document gives conflicting numbers of ${entries[0].noun}: ${listed}. Both statements are shown with their sources — we don't choose one.`,
-      claims,
-    });
-  }
-  return issues;
 }
 
 export function rowArithmeticIssue(
@@ -176,43 +99,4 @@ export function totalMismatchIssue(
       operands: lineTotals,
     },
   };
-}
-
-export function derivedLineTotalIssue(
-  page: number,
-  rowLabel: string,
-  quantity: FieldValue,
-  unitPrice: FieldValue,
-): Issue | null {
-  const q = parseLeadingAmount(quantity.value);
-  const p = parseLeadingAmount(unitPrice.value);
-  if (q === null || p === null) return null;
-  const calc = round2(q * p);
-  const currency = unitPrice.value.includes("$");
-  const derivedValue = currency ? formatMoney(calc) : String(calc);
-  return {
-    code: "derived_value",
-    plainLanguage: `${rowLabel} on page ${page} doesn't state a line total. Quantity × unit price would be ${derivedValue}. This is shown only as a cross-check — it is NOT reported as an extracted value, because the document never writes it. (See the matching refusal for why no line total appears.)`,
-    derived: {
-      value: derivedValue,
-      derivation: "quantity × unit price (calculated as a cross-check only)",
-      operands: [quantity, unitPrice],
-    },
-  };
-}
-
-export function collectDerivedLineTotals(items: LineItem[]): Issue[] {
-  const issues: Issue[] = [];
-  items.forEach((item, index) => {
-    if (item.lineTotal) return;
-    if (!item.quantity || !item.unitPrice) return;
-    const issue = derivedLineTotalIssue(
-      item.quantity.evidence.page,
-      `Row ${index + 1} ("${item.description.value}")`,
-      item.quantity,
-      item.unitPrice,
-    );
-    if (issue) issues.push(issue);
-  });
-  return issues;
 }

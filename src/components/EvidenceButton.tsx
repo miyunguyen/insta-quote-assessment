@@ -35,6 +35,7 @@ export function EvidenceButton({
   pdfUrl,
   pageCount,
   label,
+  buttonText,
 }: {
   page: number;
   sourceText: string;
@@ -42,6 +43,7 @@ export function EvidenceButton({
   pdfUrl: string | null;
   pageCount: number;
   label: string;
+  buttonText?: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -59,6 +61,7 @@ export function EvidenceButton({
         className="inline-flex items-center gap-1 rounded-md border border-neutral-300 bg-white px-1.5 py-1 text-xs font-medium text-neutral-500 shadow-sm hover:border-neutral-500 hover:text-neutral-900"
       >
         <EyeIcon />
+        {buttonText}
       </button>
       {open && (
         <EvidenceModal

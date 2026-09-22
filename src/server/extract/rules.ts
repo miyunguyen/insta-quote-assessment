@@ -34,18 +34,6 @@ export function badRowRefusal(
   };
 }
 
-export function wouldRequireComputationRefusal(
-  pageNumber: number,
-  section: string,
-): Refusal {
-  return {
-    code: "would_require_computation",
-    scope: { page: pageNumber, section, field: "lineTotal" },
-    plainLanguage: `The section on page ${pageNumber} lists quantities and unit prices but never states line totals. We only report numbers that are written in the document — we don't fill gaps with our own calculations — so no line totals are reported for it.`,
-    technicalDetail: `Header on page ${pageNumber} includes quantity and unitPrice columns but no lineTotal column; derivation into items is disabled by policy.`,
-  };
-}
-
 export function ambiguousReferenceRefusal(
   pageNumber: number,
   amounts: string[],

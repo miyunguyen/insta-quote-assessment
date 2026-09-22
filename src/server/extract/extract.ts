@@ -6,16 +6,12 @@ import {
   pageErrorRefusal,
   pageNoTextRefusal,
   valueNotStatedRefusal,
-  wouldRequireComputationRefusal,
 } from "./rules";
 import {
-  collectDerivedLineTotals,
   metaContradictionIssue,
   rowArithmeticIssue,
-  scanNumericClaimIssues,
   totalMismatchIssue,
   type MetaClaim,
-  type NoteLine,
 } from "./validate";
 import { verifyTraceability } from "./verify";
 import { parseLeadingAmount } from "./normalize";
@@ -78,7 +74,6 @@ export function buildExtraction(
 
   const metaClaims: MetaClaim[] = [];
   const totalClaims: Array<{ page: number; field: FieldValue }> = [];
-  const notes: NoteLine[] = [];
   let firstSectionTitle: string | null = null;
 
   for (const page of doc.pages) {
@@ -145,15 +140,6 @@ export function buildExtraction(
 
     if (page.header) {
       const fieldNames = headerFieldNames(page.header);
-
-      const hasQty = fieldNames.includes("quantity");
-      const hasPrice = fieldNames.includes("unitPrice");
-      const hasTotal = fieldNames.includes("lineTotal");
-      if (hasQty && hasPrice && !hasTotal && page.rows.length > 0) {
-        build.refusals.push(
-          wouldRequireComputationRefusal(page.pageNumber, section),
-        );
-      }
 
       for (const row of page.rows) {
         const record: Record<string, FieldValue> = {};
@@ -231,12 +217,6 @@ export function buildExtraction(
     }
 
     for (const other of page.otherLines) {
-      notes.push({
-        text: other.text,
-        page: page.pageNumber,
-        lineNumber: other.lineNumber,
-      });
-
       const totalLine = /^Total:\s*(.+)$/.exec(other.text);
       if (totalLine) {
         const rest = totalLine[1].trim();
@@ -340,10 +320,9 @@ export function buildExtraction(
     if (!build.total) build.total = field;
   }
 
-  issues.push(...scanNumericClaimIssues(notes, linesByPage));
-
   // A stated total is checked against its own page's line totals only —
-  // each page/section of a multi-page document stands on its own.
+  // each page/section of a multi-page document stands on its own. This is
+  // the one bonus cross-check: genuine conflict in stated numbers.
   for (const build of pageBuilds.values()) {
     if (build.total) {
       const lineTotals = build.items
@@ -353,9 +332,6 @@ export function buildExtraction(
       if (mismatch) issues.push(mismatch);
     }
   }
-
-  const allItems = [...pageBuilds.values()].flatMap((build) => build.items);
-  issues.push(...collectDerivedLineTotals(allItems));
 
   // Every page 1..pageCount appears, even image-only ones (shell + refusal).
   const pages: ResultPage[] = Array.from(

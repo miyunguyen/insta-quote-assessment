@@ -32,7 +32,6 @@ export const refusalCodeSchema = z.enum([
   "page_parse_failed",
   "unreadable_value",
   "value_not_stated",
-  "would_require_computation",
   "ambiguous_reference",
 ]);
 export type RefusalCode = z.infer<typeof refusalCodeSchema>;
@@ -105,11 +104,6 @@ export const issueSchema = z.discriminatedUnion("code", [
     code: z.literal("arithmetic_mismatch"),
     plainLanguage: z.string().min(1),
     stated: z.array(fieldValueSchema).min(1),
-    derived: derivedValueSchema,
-  }),
-  z.object({
-    code: z.literal("derived_value"),
-    plainLanguage: z.string().min(1),
     derived: derivedValueSchema,
   }),
 ]);

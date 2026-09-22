@@ -123,7 +123,7 @@ try {
     );
   }
 
-  // 5. contradiction doc -> 200 with contradiction issue
+  // 5. totals reconcile -> 200, stated total kept, no issues
   {
     const bytes = await readFile(path.join(SAMPLES, "KBS-10262.pdf"));
     const { res, payload } = await postFile(
@@ -133,8 +133,13 @@ try {
     );
     check("KBS-10262 -> 200", res.status === 200, `status=${res.status}`);
     check(
-      "KBS-10262 -> contradiction issue",
-      payload?.issues?.some((i) => i.code === "contradiction") === true,
+      "KBS-10262 -> stated total kept",
+      payload?.pages?.[0]?.total?.value === "$5,122.40",
+      `total=${payload?.pages?.[0]?.total?.value}`,
+    );
+    check(
+      "KBS-10262 -> no issues",
+      payload?.issues?.length === 0,
       `issues=${JSON.stringify(payload?.issues?.map((i) => i.code))}`,
     );
   }

@@ -147,7 +147,7 @@ describe("refusal messages stay human-readable", () => {
       }
     }
     // sanity: the guard actually inspected real refusals
-    expect(refusalCount).toBeGreaterThanOrEqual(4);
+    expect(refusalCount).toBeGreaterThanOrEqual(3);
   });
 });
 

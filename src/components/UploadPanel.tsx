@@ -17,6 +17,25 @@ type Phase = "idle" | "loading" | "done" | "error";
 
 type ApiError = { code: string; message: string };
 
+// Raw codes never reach the screen — the badge always shows a short label.
+const UPLOAD_ERROR_LABELS: Record<string, string> = {
+  missing_file: "No file chosen",
+  not_a_pdf: "Not a PDF",
+  not_pdf: "Not a PDF",
+  too_large: "File too large",
+  encrypted_pdf: "Encrypted PDF",
+  unreadable_pdf: "Unreadable PDF",
+  internal_error: "Server error",
+  network: "Connection failed",
+};
+
+function uploadErrorLabel(code: string): string {
+  return (
+    UPLOAD_ERROR_LABELS[code] ??
+    (code.startsWith("http_") ? "Request failed" : "Upload failed")
+  );
+}
+
 function isPdfFile(file: File): boolean {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
@@ -183,8 +202,8 @@ export function UploadPanel() {
           className="rounded-lg border border-red-300 bg-red-50 p-4"
         >
           <div className="flex items-center gap-2">
-            <span className="rounded border border-red-200 bg-red-100 px-1.5 py-0.5 font-mono text-xs text-red-900">
-              {error.code}
+            <span className="rounded border border-red-200 bg-red-100 px-1.5 py-0.5 text-xs text-red-900">
+              {uploadErrorLabel(error.code)}
             </span>
             <span className="text-[15px] font-medium text-red-950">
               Extraction could not run

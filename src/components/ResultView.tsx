@@ -5,6 +5,7 @@ import type {
   Issue,
   LineItem,
   Refusal,
+  RefusalCode,
   ResultPage,
 } from "@/server/extract/types";
 import { EvidenceButton } from "./EvidenceButton";
@@ -12,6 +13,20 @@ import { EvidenceButton } from "./EvidenceButton";
 type EvidencePlumbing = {
   pdfUrl: string | null;
   pageCount: number;
+};
+
+// Raw codes never reach the screen — every badge shows a short human label.
+const REFUSAL_LABELS: Record<RefusalCode, string> = {
+  page_no_text: "Image-only page",
+  page_parse_failed: "Unreadable page",
+  unreadable_value: "Unreadable value",
+  value_not_stated: "Value not stated",
+  ambiguous_reference: "Ambiguous total",
+};
+
+const ISSUE_LABELS: Record<Issue["code"], string> = {
+  contradiction: "Conflicting values",
+  arithmetic_mismatch: "Numbers don't add up",
 };
 
 const FIELD_LABELS: Array<{
@@ -237,8 +252,8 @@ function RefusalsList({
             className="rounded-lg border border-amber-200 bg-amber-50 p-4"
           >
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="rounded border border-amber-300 bg-amber-100 px-1.5 py-0.5 font-mono text-amber-900">
-                {refusal.code}
+              <span className="rounded border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900">
+                {REFUSAL_LABELS[refusal.code]}
               </span>
               <span className="text-amber-800">
                 page {refusal.scope.page}
@@ -286,18 +301,15 @@ function IssuesList({
   if (issues.length === 0) return null;
   return (
     <section className="mb-8">
-      <SectionHeader
-        title="Conflicts & calculated checks"
-        count={issues.length}
-      />
+      <SectionHeader title="Conflicts" count={issues.length} />
       <ul className="space-y-3">
         {issues.map((issue, index) => (
           <li
             key={index}
             className="rounded-lg border border-violet-200 bg-violet-50 p-4"
           >
-            <span className="rounded border border-violet-300 bg-violet-100 px-1.5 py-0.5 font-mono text-xs text-violet-900">
-              {issue.code}
+            <span className="rounded border border-violet-300 bg-violet-100 px-1.5 py-0.5 text-xs text-violet-900">
+              {ISSUE_LABELS[issue.code]}
             </span>
             <p className="mt-2 text-[15px] leading-relaxed text-neutral-900">
               {issue.plainLanguage}
@@ -339,6 +351,7 @@ function IssuesList({
                         rect={field.evidence.rect}
                         pdfUrl={pdfUrl}
                         pageCount={pageCount}
+                        buttonText={field.value}
                         label="Stated value"
                       />
                     </span>
@@ -351,9 +364,6 @@ function IssuesList({
                   <span className="font-mono text-neutral-900">
                     {issue.derived.value}
                   </span>
-                  <span className="ml-1 text-xs text-violet-800">
-                    ({issue.derived.derivation})
-                  </span>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {issue.derived.operands.map((operand, operandIndex) => (
@@ -364,34 +374,7 @@ function IssuesList({
                       rect={operand.evidence.rect}
                       pdfUrl={pdfUrl}
                       pageCount={pageCount}
-                      label="Operand value"
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-            {issue.code === "derived_value" && (
-              <div className="mt-3 space-y-2 border-t border-violet-200 pt-3 text-[15px]">
-                <div>
-                  <span className="text-violet-900">
-                    Calculated (not stated):
-                  </span>{" "}
-                  <span className="font-mono text-neutral-900">
-                    {issue.derived.value}
-                  </span>
-                  <span className="ml-1 text-xs text-violet-800">
-                    ({issue.derived.derivation})
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {issue.derived.operands.map((operand, operandIndex) => (
-                    <EvidenceButton
-                      key={operandIndex}
-                      page={operand.evidence.page}
-                      sourceText={operand.evidence.sourceText}
-                      rect={operand.evidence.rect}
-                      pdfUrl={pdfUrl}
-                      pageCount={pageCount}
+                      buttonText={operand.value}
                       label="Operand value"
                     />
                   ))}
@@ -443,11 +426,7 @@ export function ResultView({
         )}
       </div>
 
-      <RefusalsList
-        refusals={refusals}
-        pdfUrl={pdfUrl}
-        pageCount={pageCount}
-      />
+      <RefusalsList refusals={refusals} pdfUrl={pdfUrl} pageCount={pageCount} />
       <IssuesList
         issues={result.issues}
         pdfUrl={pdfUrl}

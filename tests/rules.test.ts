@@ -111,11 +111,13 @@ describe("refusal rules on real samples", () => {
     for (const page of numbered) {
       expect(page.fields.documentNumber?.value).toBe("KBS-DR118");
       expect(page.fields.date?.value).toBe("24 August 2026");
+      expect(page.fields.documentNumber?.evidence.rect).toBeDefined();
+      expect(page.fields.date?.evidence.rect).toBeDefined();
     }
     expect(result.issues).toHaveLength(0);
   });
 
-  test("KBS-10255: no line totals computed into items; refusal + derived cross-checks in issues", async () => {
+  test("KBS-10255: no line totals computed into items; unstated values refused with reason", async () => {
     const result = await extractSample("KBS-10255.pdf");
     const items = allItems(result);
     expect(items).toHaveLength(4);
@@ -124,12 +126,7 @@ describe("refusal rules on real samples", () => {
       expect(item.quantity).toBeDefined();
       expect(item.unitPrice).toBeDefined();
     }
-    const compRefusal = allRefusals(result).find(
-      (r) => r.code === "would_require_computation",
-    );
-    expect(compRefusal).toBeDefined();
-    expect(compRefusal?.scope.field).toBe("lineTotal");
-
+    // absent columns are not refusals — only the stated-but-unreadable value is
     const weightRefusal = allRefusals(result).find(
       (r) => r.code === "value_not_stated",
     );
@@ -137,17 +134,8 @@ describe("refusal rules on real samples", () => {
       "see individual lines",
     );
 
-    const derived = result.issues.filter((i) => i.code === "derived_value");
-    expect(derived).toHaveLength(4);
-    expect(derived[0].code === "derived_value" && derived[0].derived.value).toBe(
-      "$272.00",
-    );
-    expect(
-      derived[0].code === "derived_value" &&
-        derived[0].derived.operands.every((o) => o.evidence.sourceText.length > 0),
-    ).toBe(true);
-
-    // No derived line total may leak into items or document fields
+    // no what-if values anywhere: no derived issues, nothing computed
+    expect(result.issues).toHaveLength(0);
     const raw = JSON.stringify({
       document: result.document,
       pages: result.pages,
@@ -155,23 +143,11 @@ describe("refusal rules on real samples", () => {
     expect(raw).not.toContain("$272.00");
   });
 
-  test("KBS-10262: pallet contradiction surfaced with both claims; totals reconcile", async () => {
+  test("KBS-10262: notes ignored; stated total kept, totals reconcile", async () => {
     const result = await extractSample("KBS-10262.pdf");
-    const contradiction = result.issues.find((i) => i.code === "contradiction");
-    expect(contradiction).toBeDefined();
-    if (contradiction?.code !== "contradiction") throw new Error("wrong code");
-    expect(contradiction.claims).toHaveLength(2);
-    const values = contradiction.claims.map((c) => c.value);
-    expect(values).toContain("14 pallets");
-    expect(values).toContain("16 pallets");
-    for (const claim of contradiction.claims) {
-      expect(claim.evidence.page).toBe(1);
-      expect(claim.evidence.sourceText.length).toBeGreaterThan(0);
-    }
+    expect(allItems(result)).toHaveLength(3);
     // stated total equals sum of line totals → no arithmetic issue
-    expect(result.issues.some((i) => i.code === "arithmetic_mismatch")).toBe(
-      false,
-    );
+    expect(result.issues).toHaveLength(0);
     expect(result.pages[0].total?.value).toBe("$5,122.40");
   });
 
@@ -225,13 +201,12 @@ describe("traceability invariant across all samples", () => {
         expect(fv.evidence.page).toBeGreaterThanOrEqual(1);
         expect(fv.evidence.page).toBeLessThanOrEqual(result.document.pageCount);
       }
-      // derived values must never appear in stated fields
+      // bonus conflicts must reference actually extracted values, not invented ones
       for (const issue of result.issues) {
-        if (issue.code !== "derived_value" && issue.code !== "arithmetic_mismatch")
-          continue;
+        if (issue.code !== "arithmetic_mismatch") continue;
         const statedValues = allFieldValues(result).map((f) => f.value);
-        if (issue.code === "derived_value") {
-          expect(statedValues).not.toContain(issue.derived.value);
+        for (const stated of issue.stated) {
+          expect(statedValues).toContain(stated.value);
         }
       }
     }
@@ -359,6 +334,7 @@ describe("refusal rules on synthetic pages", () => {
     for (const page of result.pages) {
       expect(page.fields.documentNumber?.value).toBe("SAME-1");
       expect(page.fields.documentNumber?.evidence.page).toBe(page.pageNumber);
+      expect(page.fields.documentNumber?.evidence.rect).toBeDefined();
     }
     expect(
       result.issues.some((i) => i.code === "contradiction"),
