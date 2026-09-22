@@ -17,7 +17,6 @@ type Phase = "idle" | "loading" | "done" | "error";
 
 type ApiError = { code: string; message: string };
 
-// Raw codes never reach the screen — the badge always shows a short label.
 const UPLOAD_ERROR_LABELS: Record<string, string> = {
   missing_file: "No file chosen",
   not_a_pdf: "Not a PDF",
@@ -37,7 +36,9 @@ function uploadErrorLabel(code: string): string {
 }
 
 function isPdfFile(file: File): boolean {
-  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  return (
+    file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+  );
 }
 
 export function UploadPanel() {
