@@ -3,11 +3,6 @@ import type { PageLine, PageToken } from "./pdf";
 import type { EvidenceRect } from "./types";
 
 // Geometry helpers: turn extraction-time tokens into evidence rects.
-//
-// A rect pins the box to where the value actually sits, so the viewer never
-// has to re-search the page by text (first-match search draws the box on the
-// wrong occurrence when text repeats — e.g. quantity "12" matching inside
-// date "12 August 2026").
 
 export function tokenRect(token: PageToken): EvidenceRect {
   const height =

@@ -144,9 +144,7 @@ export function UploadPanel() {
         <p className="text-base font-medium text-neutral-900">
           Drop a PDF here, or click to choose a file
         </p>
-        <p className="mt-1 text-sm text-neutral-500">
-          PDF only · max 10 MB · nothing is stored after extraction
-        </p>
+        <p className="mt-1 text-sm text-neutral-500">PDF only · max 10 MB</p>
         <input
           ref={inputRef}
           type="file"
