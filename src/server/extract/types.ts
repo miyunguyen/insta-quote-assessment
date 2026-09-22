@@ -44,6 +44,7 @@ export const lineItemSchema = z.object({
   description: fieldValueSchema,
   quantity: fieldValueSchema.optional(),
   unit: fieldValueSchema.optional(),
+  weight: fieldValueSchema.optional(),
   unitPrice: fieldValueSchema.optional(),
   lineTotal: fieldValueSchema.optional(),
   rowSourceText: z.string().min(1),
@@ -56,6 +57,7 @@ export const documentFieldsSchema = z.object({
   deliveredTo: fieldValueSchema.optional(),
   orderedBy: fieldValueSchema.optional(),
   sectionTitle: fieldValueSchema.optional(),
+  total: fieldValueSchema.optional(),
 });
 export type DocumentFields = z.infer<typeof documentFieldsSchema>;
 
