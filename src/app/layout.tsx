@@ -13,9 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Packing-list extractor",
-  description:
-    "Extract line items from packing-list PDFs with page-level evidence. Unreadable or contradictory values are refused, never guessed.",
+  title: "Line items extractor",
+  description: "Extract line items from PDFs with page-level evidence.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
