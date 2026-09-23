@@ -76,21 +76,17 @@ provided samples.
 
 ### 3. What I'd do with three more days
 
-1. **Build an evaluation harness using real customer documents**, measuring
-   refusal precision — six samples are not enough to establish real-world
-   performance.
+1. **Strengthen the test suite** with more targeted and synthetic edge cases for
+   extraction, evidence, ambiguity, contradiction, and refusal behavior.
 
-2. **Improve table detection further** with x-position column inference for
-   cells that split across tokens, an explicit `no_table_found` refusal.
+2. **Improve table detection beyond literal headers** using fuzzy and positional
+   matching, and add an explicit `no_table_found` refusal.
 
 3. **Add tRPC + shared contract types** to align with the team stack. Part A
    intentionally uses plain REST so it can be called without a TypeScript client.
 
 4. **Improve the PDF evidence viewer**, potentially using an extended PDF viewer
-   library for better interaction.
-
-5. **Expand the test suite** with more documents and clearly defined test scenarios
-   covering the main extraction and refusal paths.
+   library for better interaction and more robust PDF highlight handling.
 
 ## How the brief's requirements are met
 
