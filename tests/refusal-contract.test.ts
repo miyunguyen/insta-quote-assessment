@@ -97,8 +97,9 @@ describe("refusal code coverage", () => {
     );
     expect(refusal?.plainLanguage).toContain("isn't clear which figure");
     expect(refusal?.plainLanguage).toContain("$100.00, $95.00");
-    // the stated line total on the row is untouched
-    expect(result.pages[0].items[0].lineTotal?.value).toBe("$20.00");
+    // the row's trailing money cell is untouched
+    const rowCells = result.pages[0].items[0].cells.map((c) => c.value);
+    expect(rowCells[rowCells.length - 1]).toBe("$20.00");
   });
 });
 

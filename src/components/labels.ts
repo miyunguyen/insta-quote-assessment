@@ -6,6 +6,7 @@ export const REFUSAL_LABELS: Record<RefusalCode, string> = {
   unreadable_value: "Unreadable value",
   value_not_stated: "Value not stated",
   ambiguous_reference: "Ambiguous total",
+  unparseable_table: "Unreadable table",
 };
 
 export const ISSUE_LABELS: Record<Issue["code"], string> = {

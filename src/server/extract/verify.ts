@@ -1,6 +1,7 @@
 import { evidenceContains } from "@/lib/text";
 import { traceabilityRefusal } from "./rules";
 import type {
+  CellValue,
   DocumentFields,
   ExtractionResult,
   FieldValue,
@@ -73,40 +74,24 @@ function verifyPage(
 
   const items: LineItem[] = [];
   for (const item of page.items) {
-    const copy = { ...item };
-    let dropItem = false;
-
-    const description = item.description;
-    const descOk =
-      description &&
-      description.evidence.page >= 1 &&
-      description.evidence.page <= pageCount &&
-      evidenceContains(description.evidence.sourceText, description.value);
-    if (!descOk) {
-      dropItem = true;
-      onViolation(
-        "item.description",
-        description.value,
-        description.evidence.sourceText,
-        description.evidence.page,
-      );
-    }
-
-    const optional = checkFields(
-      {
-        quantity: item.quantity,
-        unit: item.unit,
-        weight: item.weight,
-        unitPrice: item.unitPrice,
-        lineTotal: item.lineTotal,
-      },
-      `${owner}.item`,
-      pageCount,
-      onViolation,
-    );
-
-    if (!dropItem) {
-      items.push({ ...copy, ...optional });
+    const cells: CellValue[] = [];
+    item.cells.forEach((cell, index) => {
+      const { value, evidence } = cell;
+      const inBounds = evidence.page >= 1 && evidence.page <= pageCount;
+      if (!inBounds || !evidenceContains(evidence.sourceText, value)) {
+        onViolation(
+          `${owner}.item.cell_${index}`,
+          value,
+          evidence.sourceText,
+          evidence.page,
+        );
+        return;
+      }
+      cells.push(cell);
+    });
+    // A row whose every cell fails verification carries nothing verifiable.
+    if (cells.length > 0) {
+      items.push({ ...item, cells });
     }
   }
 

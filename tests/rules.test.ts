@@ -2,12 +2,19 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { buildExtraction, extractFromPdf } from "@/server/extract/extract";
-import type { DocumentLoadResult, PageLine, PageResult } from "@/server/extract/pdf";
+import type {
+  DocumentLoadResult,
+  PageLine,
+  PageResult,
+} from "@/server/extract/pdf";
 import { verifyTraceability } from "@/server/extract/verify";
-import {
-  evidenceContains,
-} from "@/lib/text";
-import type { ExtractionResult, FieldValue, LineItem, Refusal } from "@/server/extract/types";
+import { evidenceContains } from "@/lib/text";
+import type {
+  ExtractionResult,
+  FieldValue,
+  LineItem,
+  Refusal,
+} from "@/server/extract/types";
 
 const samplesDir = path.resolve(process.cwd(), "sample-files-variant-A");
 
@@ -61,20 +68,20 @@ function allFieldValues(result: ExtractionResult): FieldValue[] {
     }
     if (page.total) out.push(page.total);
     for (const item of page.items) {
-      for (const key of [
-        "description",
-        "quantity",
-        "unit",
-        "weight",
-        "unitPrice",
-        "lineTotal",
-      ] as const) {
-        const fv = item[key];
-        if (fv) out.push(fv);
+      for (const cell of item.cells) {
+        out.push({ value: cell.value, evidence: cell.evidence });
       }
     }
   }
   return out;
+}
+
+function cellTexts(item: LineItem): string[] {
+  return item.cells.map((cell) => cell.value);
+}
+
+function lastCell(item: LineItem): string {
+  return item.cells[item.cells.length - 1]?.value ?? "";
 }
 
 describe("refusal rules on real samples", () => {
@@ -117,15 +124,25 @@ describe("refusal rules on real samples", () => {
     expect(result.issues).toHaveLength(0);
   });
 
-  test("KBS-10255: no line totals computed into items; unstated values refused with reason", async () => {
+  test("KBS-10255: plain cells, unstated values refused with reason", async () => {
     const result = await extractSample("KBS-10255.pdf");
     const items = allItems(result);
     expect(items).toHaveLength(4);
-    for (const item of items) {
-      expect(item.lineTotal).toBeUndefined();
-      expect(item.quantity).toBeDefined();
-      expect(item.unitPrice).toBeDefined();
-    }
+    expect(cellTexts(items[0])).toEqual([
+      "1",
+      "Galv nails 90mm, bulk",
+      "4",
+      "25kg",
+      "$68.00 /bag",
+    ]);
+    // labels are the document's own words
+    expect(result.pages[0].tableLabels).toEqual([
+      "Item",
+      "Description",
+      "Qty",
+      "Weight",
+      "Unit Price",
+    ]);
     // absent columns are not refusals — only the stated-but-unreadable value is
     const weightRefusal = allRefusals(result).find(
       (r) => r.code === "value_not_stated",
@@ -154,20 +171,18 @@ describe("refusal rules on real samples", () => {
   test("KBS-10270: stated total kept, mismatch flagged, no invented reconciling number", async () => {
     const result = await extractSample("KBS-10270.pdf");
     expect(result.pages[0].total?.value).toBe("$1,612.90");
-    expect(result.pages[0].total?.evidence.sourceText).toContain(
-      "$1,612.90",
+    expect(result.pages[0].total?.evidence.sourceText).toContain("$1,612.90");
+    const mismatch = result.issues.find(
+      (i) => i.code === "arithmetic_mismatch",
     );
-    const mismatch = result.issues.find((i) => i.code === "arithmetic_mismatch");
     expect(mismatch).toBeDefined();
     if (mismatch?.code !== "arithmetic_mismatch") throw new Error("wrong code");
     expect(mismatch.derived.value).toBe("$1,538.20");
     expect(mismatch.stated[0].value).toBe("$1,612.90");
     expect(mismatch.derived.operands).toHaveLength(4);
     expect(mismatch.plainLanguage).toContain("doesn't equal");
-    // each stated line total remains individually extracted with evidence
-    const totals = allItems(result)
-      .map((i) => i.lineTotal?.value)
-      .filter(Boolean);
+    // each row's trailing money cell remains individually extracted
+    const totals = allItems(result).map((i) => lastCell(i));
     expect(totals).toEqual(["$936.00", "$160.20", "$64.00", "$378.00"]);
   });
 
@@ -229,7 +244,9 @@ describe("refusal rules on synthetic pages", () => {
     );
     const result = buildExtraction(doc, "synthetic.pdf");
     expect(allItems(result)).toHaveLength(2);
-    const refusal = allRefusals(result).find((r) => r.code === "unreadable_value");
+    const refusal = allRefusals(result).find(
+      (r) => r.code === "unreadable_value",
+    );
     expect(refusal).toBeDefined();
     expect(refusal?.evidence?.sourceText).toBe("2 Broken row");
     expect(refusal?.plainLanguage).toContain("didn't match");
@@ -277,25 +294,24 @@ describe("refusal rules on synthetic pages", () => {
     expect(verified.violations[0].plainLanguage).toContain("page 1");
   });
 
-  test("row arithmetic mismatch produces issue with operand evidence", () => {
+  test("single money column skips the page-total check instead of guessing", () => {
     const doc = syntheticDoc(
       okPage(1, [
         line(900, ["Example Co"]),
         line(880, ["Invoice"]),
         line(860, ["Document No: TEST-4"]),
-        line(800, HEADER),
+        line(800, ["No", "Description", "Qty", "Price"]),
         line(795, ["-".repeat(60)]),
-        line(780, ["1", "Widget", "2", "ea", "$10.00", "$99.00"]),
+        line(780, ["1", "Widget", "2", "$10.00"]),
+        line(760, ["Total:", "$20.00"]),
       ]),
     );
     const result = buildExtraction(doc, "synthetic.pdf");
-    // stated line total still extracted (it has a source)
-    expect(result.pages[0].items[0].lineTotal?.value).toBe("$99.00");
-    const mismatch = result.issues.find((i) => i.code === "arithmetic_mismatch");
-    expect(mismatch).toBeDefined();
-    if (mismatch?.code !== "arithmetic_mismatch") throw new Error("wrong code");
-    expect(mismatch.derived.value).toBe("$20.00");
-    expect(mismatch.derived.operands[0].evidence.sourceText).toBe("2");
+    // the lone money cell may be a price, not a total — summing it against
+    // the stated total could false-flag, so the check is skipped entirely
+    expect(allItems(result)).toHaveLength(1);
+    expect(result.pages[0].total?.value).toBe("$20.00");
+    expect(result.issues).toHaveLength(0);
   });
 
   test("conflicting document numbers across pages: field omitted, both claims kept", () => {
@@ -314,7 +330,9 @@ describe("refusal rules on synthetic pages", () => {
       result.pages.every((p) => p.fields.documentNumber === undefined),
     ).toBe(true);
     const contradiction = result.issues.find((i) => i.code === "contradiction");
-    expect(contradiction?.code === "contradiction" && contradiction.claims).toHaveLength(2);
+    expect(
+      contradiction?.code === "contradiction" && contradiction.claims,
+    ).toHaveLength(2);
     expect(allItems(result)).toHaveLength(2);
   });
 
@@ -336,8 +354,221 @@ describe("refusal rules on synthetic pages", () => {
       expect(page.fields.documentNumber?.evidence.page).toBe(page.pageNumber);
       expect(page.fields.documentNumber?.evidence.rect).toBeDefined();
     }
+    expect(result.issues.some((i) => i.code === "contradiction")).toBe(false);
+  });
+
+  test("uniform rows wider than the header extract with generic labels", () => {
+    const doc = syntheticDoc(
+      okPage(1, [
+        line(900, ["Example Co"]),
+        line(880, ["Packing List"]),
+        line(860, ["Document No: TEST-7"]),
+        line(800, ["No", "Description", "Qty", "Unit Price"]),
+        line(795, ["-".repeat(60)]),
+        line(780, ["1", "Widget", "2", "ea", "$10.00"]),
+        line(760, ["2", "Gadget", "1", "ea", "$5.00"]),
+      ]),
+    );
+    const result = buildExtraction(doc, "synthetic.pdf");
+    // 5 plain cells under 4 headings: rows still extract, labels generic
+    const items = allItems(result);
+    expect(items).toHaveLength(2);
+    expect(cellTexts(items[0])).toEqual(["1", "Widget", "2", "ea", "$10.00"]);
+    expect(result.pages[0].tableLabels).toBeUndefined();
+    expect(result.pages[0].tableHeaderText).toBe(
+      "No Description Qty Unit Price",
+    );
+    expect(allRefusals(result)).toHaveLength(0);
+  });
+
+  test("short row among good rows → per-row refusal, siblings extracted", () => {
+    const doc = syntheticDoc(
+      okPage(1, [
+        line(900, ["Example Co"]),
+        line(880, ["Packing List"]),
+        line(860, ["Document No: TEST-8"]),
+        line(800, ["No", "Description", "Qty", "Unit Price"]),
+        line(795, ["-".repeat(60)]),
+        line(780, ["1", "Widget", "2", "$10.00"]),
+        line(760, ["2", "Broken"]),
+        line(740, ["3", "Gadget", "1", "$5.00"]),
+      ]),
+    );
+    const result = buildExtraction(doc, "synthetic.pdf");
+    const items = allItems(result);
+    expect(items).toHaveLength(2);
+    expect(cellTexts(items[0])).toEqual(["1", "Widget", "2", "$10.00"]);
+    expect(items[0].cells[3].evidence.rect).toBeDefined();
     expect(
-      result.issues.some((i) => i.code === "contradiction"),
+      allRefusals(result).some((r) => r.code === "unparseable_table"),
     ).toBe(false);
+    const refusal = allRefusals(result).find(
+      (r) => r.code === "unreadable_value",
+    );
+    expect(refusal?.evidence?.sourceText).toBe("2 Broken");
+  });
+
+  test("pipe-delimited docket with partial header extracts fully", () => {
+    // Mirrors the KBS-10234-2 layout from the reviewer dump: pipe cells, a
+    // 3-heading header over 6-cell rows, and a piped total line.
+    const doc = syntheticDoc(
+      okPage(1, [
+        line(785.2, ["Kowhai", "Building", "Supplies", "Ltd"]),
+        line(745.5, ["Document", "No:", "KBS-10234"]),
+        line(731.3, ["Date:", "12", "August", "2026"]),
+        line(717.2, ["Delivered", "to:", "Site", "14,", "Tirau", "Street"]),
+        line(703.0, ["Ordered", "by:", "R.", "Fenwick"]),
+        line(666.1, ["Description", "|", "Unit", "|", "Line Total"]),
+        line(660.5, ["-".repeat(119)]),
+        line(643.5, [
+          "1",
+          "|",
+          "10mm",
+          "GIB",
+          "Standard",
+          "board",
+          "2400x1200",
+          "|",
+          "48",
+          "|",
+          "sheet",
+          "|",
+          "$24.90",
+          "|",
+          "$1,195.20",
+        ]),
+        line(626.5, [
+          "2",
+          "|",
+          "13mm",
+          "GIB",
+          "Fyreline",
+          "board",
+          "2700x1200",
+          "|",
+          "12",
+          "|",
+          "sheet",
+          "|",
+          "$38.50",
+          "|",
+          "$462.00",
+        ]),
+        line(609.4, [
+          "3",
+          "|",
+          "Stud",
+          "adhesive",
+          "400ml",
+          "cartridge",
+          "|",
+          "36",
+          "|",
+          "ea",
+          "|",
+          "$9.80",
+          "|",
+          "$352.80",
+        ]),
+        line(592.4, [
+          "4",
+          "|",
+          "GIB",
+          "Rondo",
+          "top",
+          "hat",
+          "batten",
+          "3.6m",
+          "|",
+          "20",
+          "|",
+          "ea",
+          "|",
+          "$14.20",
+          "|",
+          "$284.00",
+        ]),
+        line(575.4, [
+          "5",
+          "|",
+          "Plasterboard",
+          "screws",
+          "32mm",
+          "(box",
+          "of",
+          "1000)",
+          "|",
+          "8",
+          "|",
+          "box",
+          "|",
+          "$42.00",
+          "|",
+          "$336.00",
+        ]),
+        line(541.4, ["Total:", "|", "$2,630.00"]),
+        line(513.1, [
+          "All",
+          "items",
+          "checked",
+          "against",
+          "delivery",
+          "docket",
+          "on",
+          "arrival.",
+          "No",
+          "damage",
+          "noted.",
+        ]),
+      ]),
+    );
+    const result = buildExtraction(doc, "KBS-10234-2.pdf");
+    const items = allItems(result);
+    expect(items).toHaveLength(5);
+    expect(cellTexts(items[0])).toEqual([
+      "1",
+      "10mm GIB Standard board 2400x1200",
+      "48",
+      "sheet",
+      "$24.90",
+      "$1,195.20",
+    ]);
+    expect(items[0].cells[1].evidence.rect).toBeDefined();
+    // 3 headings, 6 cells: generic labels with the header line as context
+    expect(result.pages[0].tableLabels).toBeUndefined();
+    expect(result.pages[0].tableHeaderText).toBe(
+      "Description | Unit | Line Total",
+    );
+    expect(result.pages[0].total?.value).toBe("$2,630.00");
+    expect(result.pages[0].total?.evidence.sourceText).toBe(
+      "Total: | $2,630.00",
+    );
+    expect(result.pages[0].total?.evidence.rect).toBeDefined();
+    expect(result.pages[0].fields.documentNumber?.value).toBe("KBS-10234");
+    expect(allRefusals(result)).toHaveLength(0);
+    expect(result.issues).toHaveLength(0);
+  });
+
+  test("uniform short pipe rows extract with generic labels end to end", () => {
+    const doc = syntheticDoc(
+      okPage(1, [
+        line(900, ["Example Co"]),
+        line(880, ["Packing List"]),
+        line(860, ["Document No: TEST-9"]),
+        line(800, ["Item", "|", "Description", "|", "Qty", "|", "Unit Price"]),
+        line(795, ["-".repeat(60)]),
+        line(780, ["1", "|", "Widget", "|", "2"]),
+        line(760, ["2", "|", "Gadget", "|", "1"]),
+      ]),
+    );
+    const result = buildExtraction(doc, "synthetic.pdf");
+    const items = allItems(result);
+    expect(items).toHaveLength(2);
+    expect(cellTexts(items[0])).toEqual(["1", "Widget", "2"]);
+    expect(result.pages[0].tableLabels).toBeUndefined();
+    expect(result.pages[0].tableHeaderText).toBe(
+      "Item | Description | Qty | Unit Price",
+    );
+    expect(allRefusals(result)).toHaveLength(0);
   });
 });

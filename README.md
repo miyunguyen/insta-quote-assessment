@@ -54,9 +54,9 @@ provided samples.
 ### 2. Where I'm not confident
 
 - The implementation is validated against the provided PDFs, not real customer
-  documents. Table detection currently requires a literal `Item`/`Description`
-  header; otherwise, no items are extracted. The UI reports "No line items were
-  extracted", but there is no explicit refusal for "no table found".
+  documents. Tables are detected by their divider line; rows are plain cells
+  split on `|` (or text tokens), and the table's width is the most common cell
+  count with ties going to the heading count.
 
 - A total line containing two different amounts is always refused rather than
   resolved. For example, `Total: $1,000 incl $150 GST` is refused.
@@ -80,8 +80,8 @@ provided samples.
    refusal precision — six samples are not enough to establish real-world
    performance.
 
-2. **Improve table detection beyond literal headers** using fuzzy and positional
-   matching, and add an explicit `no_table_found` refusal.
+2. **Improve table detection further** with x-position column inference for
+   cells that split across tokens, an explicit `no_table_found` refusal.
 
 3. **Add tRPC + shared contract types** to align with the team stack. Part A
    intentionally uses plain REST so it can be called without a TypeScript client.
@@ -109,7 +109,7 @@ Requires Node 22.
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm test           # 32 tests (Vitest)
+npm test           # 47 tests (Vitest)
 npm run typecheck  # tsc --noEmit
 npm run lint       # ESLint
 npm run build      # production build
@@ -152,11 +152,22 @@ page, so each page keeps its own copy instead of collapsing to one record:
       "items": [
         {
           "section": "…",
-          "description": { "value": "…", "evidence": { "page": 1, "sourceText": "…" } },
-          "quantity": { "value": "48", "evidence": { "page": 1, "sourceText": "48" } },
-          "lineTotal": { "value": "$1,195.20", "evidence": { "page": 1, "sourceText": "$1,195.20" } }
+          "cells": [
+            {
+              "label": "Description",
+              "value": "…",
+              "evidence": { "page": 1, "sourceText": "…" }
+            },
+            {
+              "label": "Line Total",
+              "value": "$1,195.20",
+              "evidence": { "page": 1, "sourceText": "$1,195.20" }
+            }
+          ],
+          "rowSourceText": "…"
         }
       ],
+      "tableLabels": ["Item", "Description", "Qty", "Unit", "Unit Price", "Line Total"],
       "refusals": []
     }
   ],
@@ -174,7 +185,7 @@ to text search when no rect exists.
 |---|---|---|
 | `KBS-10234.pdf` | Clean packing list | 5 items, total $2,630.00, no refusals, no issues |
 | `KBS-10241.pdf` | Image-only page (scanned) | `page_no_text` refusal, 0 items, nothing invented |
-| `KBS-10255.pdf` | No line-total column | 4 items without line totals; `value_not_stated` for the unparsable weight total; no issues |
+| `KBS-10255.pdf` | No line-total column | 4 items, `value_not_stated` for the unparsable weight total; no issues |
 | `KBS-10262.pdf` | Consistent totals | 3 items, total $5,122.40 reconciles, no issues |
 | `KBS-10270.pdf` | Wrong stated total | Total $1,612.90 kept as written + `arithmetic_mismatch` (sums to $1,538.20) |
 | `KBS-DR118.pdf` | 8-page docket, page 4 image-only | 21 items across 7 sections, per-page meta, 1 page refusal, no issues |

@@ -45,34 +45,6 @@ export function metaContradictionIssue(
   };
 }
 
-export function rowArithmeticIssue(
-  page: number,
-  rowLabel: string,
-  quantity: FieldValue,
-  unitPrice: FieldValue,
-  lineTotal: FieldValue,
-): Issue | null {
-  const q = parseLeadingAmount(quantity.value);
-  const p = parseLeadingAmount(unitPrice.value);
-  const t = parseLeadingAmount(lineTotal.value);
-  if (q === null || p === null || t === null) return null;
-  const calc = round2(q * p);
-  if (Math.abs(calc - t) < 0.005) return null;
-  const currency =
-    unitPrice.value.includes("$") || lineTotal.value.includes("$");
-  const derivedValue = currency ? formatMoney(calc) : String(calc);
-  return {
-    code: "arithmetic_mismatch",
-    plainLanguage: `On page ${page}, ${rowLabel}: the stated line total ${lineTotal.value} doesn't equal quantity × unit price (which comes to ${derivedValue}). The stated figure is reported as written; the calculated figure appears only as this check. We don't correct the document.`,
-    stated: [lineTotal],
-    derived: {
-      value: derivedValue,
-      derivation: "quantity × unit price (calculated as a cross-check only)",
-      operands: [quantity, unitPrice],
-    },
-  };
-}
-
 export function totalMismatchIssue(
   total: FieldValue,
   lineTotals: FieldValue[],

@@ -27,12 +27,24 @@ export const fieldValueSchema = z.object({
 });
 export type FieldValue = z.infer<typeof fieldValueSchema>;
 
+export const cellValueSchema = z.object({
+  // The document's own heading for this column ("" when the headings don't
+  // line up with the data — the viewer then shows generic Column N plus the
+  // quoted header line). Deliberately the doc's words, never our labels:
+  // cells are plain text, untyped.
+  label: z.string(),
+  value: z.string().min(1),
+  evidence: evidenceSchema,
+});
+export type CellValue = z.infer<typeof cellValueSchema>;
+
 export const refusalCodeSchema = z.enum([
   "page_no_text",
   "page_parse_failed",
   "unreadable_value",
   "value_not_stated",
   "ambiguous_reference",
+  "unparseable_table",
 ]);
 export type RefusalCode = z.infer<typeof refusalCodeSchema>;
 
@@ -55,12 +67,10 @@ export type Refusal = z.infer<typeof refusalSchema>;
 
 export const lineItemSchema = z.object({
   section: z.string(),
-  description: fieldValueSchema,
-  quantity: fieldValueSchema.optional(),
-  unit: fieldValueSchema.optional(),
-  weight: fieldValueSchema.optional(),
-  unitPrice: fieldValueSchema.optional(),
-  lineTotal: fieldValueSchema.optional(),
+  // Plain-text cells in document order — no field semantics. The only
+  // number ever interpreted is a trailing money cell, used solely for the
+  // page-total cross-check (never relabeled, never derived into output).
+  cells: z.array(cellValueSchema).min(1),
   rowSourceText: z.string().min(1),
 });
 export type LineItem = z.infer<typeof lineItemSchema>;
@@ -111,15 +121,13 @@ export type Issue = z.infer<typeof issueSchema>;
 
 export const resultPageSchema = z.object({
   pageNumber: z.number().int().positive(),
-  // The page's own heading (section title), when the page has one.
   sectionTitle: fieldValueSchema.optional(),
-  // Meta fields resolved for this page alone — a multi-page document
-  // repeats its Document No / Date on every page, and each page keeps
-  // its own copy instead of collapsing to one document-level value.
   fields: documentFieldsSchema,
   total: fieldValueSchema.optional(),
   items: z.array(lineItemSchema),
   refusals: z.array(refusalSchema),
+  tableLabels: z.array(z.string()).optional(),
+  tableHeaderText: z.string().optional(),
 });
 export type ResultPage = z.infer<typeof resultPageSchema>;
 

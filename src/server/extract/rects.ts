@@ -35,6 +35,42 @@ export function lineRect(line: PageLine): EvidenceRect | undefined {
   return unionRects(line.tokens.map(tokenRect));
 }
 
+// Box around an arbitrary token span (pipe-split cells spanning several
+// tokens, including tokens shared across a pipe boundary).
+export function spanRect(tokens: PageToken[]): EvidenceRect | undefined {
+  return unionRects(tokens.map(tokenRect));
+}
+
+// Pipe-delimited cells: split a line's tokens on "|" for exact cell
+// boundaries, so multi-word cells stay intact. A token containing a pipe
+// contributes to every cell its fragments land in; pure "|" tokens are
+// delimiters only. Returns null when the line has no pipes.
+export type PipeCell = { text: string; tokenIndices: number[] };
+
+export function splitPipeCells(tokens: PageToken[]): PipeCell[] | null {
+  if (!tokens.some((t) => t.str.includes("|"))) return null;
+  const cells: PipeCell[] = [];
+  let text = "";
+  let indices: number[] = [];
+  const close = () => {
+    cells.push({ text: collapseWhitespace(text), tokenIndices: indices });
+    text = "";
+    indices = [];
+  };
+  tokens.forEach((token, i) => {
+    const parts = token.str.split("|");
+    parts.forEach((frag, j) => {
+      if (j > 0) close();
+      if (frag !== "") {
+        text += (text ? " " : "") + frag;
+        indices.push(i);
+      }
+    });
+  });
+  close();
+  return cells;
+}
+
 // Box for the char range [charStart, charStart + charLength) inside
 // line.text (tokens joined with single spaces). expectedText must match the
 // sliced range after whitespace collapsing — a mismatch means the offsets

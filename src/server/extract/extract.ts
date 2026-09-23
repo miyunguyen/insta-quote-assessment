@@ -1,21 +1,21 @@
 import { loadPages, type DocumentLoadResult, type PageLine } from "./pdf";
-import { headerFieldNames, parsePageLines, type ParsedPage } from "./parse";
+import { parsePageLines, type ParsedPage } from "./parse";
 import {
   ambiguousReferenceRefusal,
   badRowRefusal,
   pageErrorRefusal,
   pageNoTextRefusal,
+  unparseableTableRefusal,
   valueNotStatedRefusal,
 } from "./rules";
 import {
   metaContradictionIssue,
-  rowArithmeticIssue,
   totalMismatchIssue,
   type MetaClaim,
 } from "./validate";
 import { verifyTraceability } from "./verify";
 import { parseLeadingAmount } from "@/lib/text";
-import { lineRect, locateRect, tokenRect } from "./rects";
+import { lineRect, locateRect, spanRect, tokenRect } from "./rects";
 import {
   extractionResultSchema,
   type DocumentFields,
@@ -47,9 +47,13 @@ type PageBuild = {
   total?: FieldValue;
   items: LineItem[];
   refusals: Refusal[];
+  tableLabels?: string[];
+  tableHeaderText?: string;
 };
 
-function detectDocType(sectionTitle: string | null): "packing_list" | "delivery_docket" | "unknown" {
+function detectDocType(
+  sectionTitle: string | null,
+): "packing_list" | "delivery_docket" | "unknown" {
   if (!sectionTitle) return "unknown";
   if (/packing list/i.test(sectionTitle)) return "packing_list";
   if (/delivery|docket/i.test(sectionTitle)) return "delivery_docket";
@@ -107,10 +111,7 @@ type PageAccumulators = {
 };
 
 type PageGeometry = {
-  lineOf: (
-    pageNumber: number,
-    lineNumber: number,
-  ) => PageLine | undefined;
+  lineOf: (pageNumber: number, lineNumber: number) => PageLine | undefined;
   wholeLineRect: (
     pageNumber: number,
     lineNumber: number,
@@ -205,19 +206,36 @@ function collectPageOutput(
     });
   }
 
-  if (page.header) {
-    collectRowItems(page, section, geo, build, acc.issues);
-  }
-
-  for (const bad of page.badRows) {
+  if (page.tableProblem) {
+    // The table was seen but has no usable header — one refusal covers the
+    // whole table; no rows are extracted and no per-row refusals are added.
+    const problem = page.tableProblem;
     build.refusals.push(
-      badRowRefusal(
+      unparseableTableRefusal(
         page.pageNumber,
         section,
-        bad,
-        geo.wholeLineRect(page.pageNumber, bad.lineNumber),
+        problem,
+        geo.wholeLineRect(
+          page.pageNumber,
+          problem.headerLineNumber ?? problem.separatorLineNumber,
+        ),
       ),
     );
+  } else {
+    if (page.tableLabels) build.tableLabels = page.tableLabels;
+    if (page.tableHeaderText) build.tableHeaderText = page.tableHeaderText;
+    collectRowItems(page, geo, build);
+
+    for (const bad of page.badRows) {
+      build.refusals.push(
+        badRowRefusal(
+          page.pageNumber,
+          section,
+          bad,
+          geo.wholeLineRect(page.pageNumber, bad.lineNumber),
+        ),
+      );
+    }
   }
 
   collectPageTotals(page, geo, build, acc.totalClaims);
@@ -225,73 +243,48 @@ function collectPageOutput(
 
 function collectRowItems(
   page: ParsedPage,
-  section: string,
   geo: PageGeometry,
   build: PageBuild,
-  issues: Issue[],
 ): void {
-  const fieldNames = headerFieldNames(page.header!);
+  const section = buildSection(page, build);
+  const labels = page.tableLabels;
   for (const row of page.rows) {
-    const record: Record<string, FieldValue> = {};
     const rowLine = geo.lineOf(page.pageNumber, row.lineNumber);
-    fieldNames.forEach((name, i) => {
-      if (!name || name === "item") return;
-      const cell = row.cells[i];
-      if (!cell) return;
-      // cells[i] is tokens[i] by construction — the box is that token's
-      // own position, never a text re-search (so a quantity "12" can no
-      // longer land on the "12" inside a date on the same page).
-      const token = rowLine?.tokens[i];
-      record[name] = {
-        value: cell,
+    const cells = row.cells.map((text, i) => {
+      // cells[i] aligns with row.cellTokens[i] by construction (pipe
+      // tables: exact pipe segments; token tables: identity spans) — the
+      // box is that span's own position, never a text re-search (so a
+      // quantity "12" can no longer land on the "12" inside a date on the
+      // same page).
+      const span = row.cellTokens[i] ?? [i];
+      const slice = rowLine
+        ? span.flatMap((j) => {
+            const token = rowLine.tokens[j];
+            return token ? [token] : [];
+          })
+        : [];
+      return {
+        label: labels?.[i] ?? "",
+        value: text,
         evidence: {
           page: page.pageNumber,
-          sourceText: cell,
-          rect: token && token.str === cell ? tokenRect(token) : undefined,
+          sourceText: text,
+          rect:
+            slice.length === 1 && slice[0].str === text
+              ? tokenRect(slice[0])
+              : spanRect(slice),
         },
       };
     });
 
-    if (!record.description) {
-      build.refusals.push(
-        badRowRefusal(
-          page.pageNumber,
-          section,
-          {
-            lineNumber: row.lineNumber,
-            lineText: row.lineText,
-            expectedCells: page.header?.length ?? 0,
-            actualCells: row.cells.length,
-          },
-          geo.wholeLineRect(page.pageNumber, row.lineNumber),
-        ),
-      );
-      continue;
-    }
-
-    const item: LineItem = {
-      section,
-      description: record.description,
-      rowSourceText: row.lineText,
-      ...(record.quantity ? { quantity: record.quantity } : {}),
-      ...(record.unit ? { unit: record.unit } : {}),
-      ...(record.weight ? { weight: record.weight } : {}),
-      ...(record.unitPrice ? { unitPrice: record.unitPrice } : {}),
-      ...(record.lineTotal ? { lineTotal: record.lineTotal } : {}),
-    };
-    build.items.push(item);
-
-    if (item.quantity && item.unitPrice && item.lineTotal) {
-      const issue = rowArithmeticIssue(
-        page.pageNumber,
-        `row "${item.description.value}"`,
-        item.quantity,
-        item.unitPrice,
-        item.lineTotal,
-      );
-      if (issue) issues.push(issue);
-    }
+    build.items.push({ section, cells, rowSourceText: row.lineText });
   }
+}
+
+// Item section: the page's own heading when it has one, else "Page N".
+// Stored per item so rows stay readable outside their page block.
+function buildSection(page: ParsedPage, build: PageBuild): string {
+  return build.sectionTitle?.value ?? `Page ${page.pageNumber}`;
 }
 
 function collectPageTotals(
@@ -303,7 +296,10 @@ function collectPageTotals(
   for (const other of page.otherLines) {
     const totalLine = /^Total:\s*(.+)$/.exec(other.text);
     if (totalLine) {
-      const rest = totalLine[1].trim();
+      const raw = totalLine[1].trim();
+      // Pipe-delimited totals ("Total: | $2,630.00"): the pipes are cell
+      // dividers, not part of the amount.
+      const rest = raw.replace(/^(\|\s*)+/, "");
       const amountTokens = rest.match(/-?\$?\d[\d,]*(?:\.\d+)?/g) ?? [];
       const distinctAmounts = [...new Set(amountTokens)];
       if (distinctAmounts.length >= 2) {
@@ -319,11 +315,17 @@ function collectPageTotals(
       }
       if (parseLeadingAmount(rest) !== null) {
         // (.+)$ runs to the end of the match, so the value start needs no
-        // ambiguous indexOf search.
-        const raw = totalLine[1];
-        const leading = raw.length - raw.trimStart().length;
+        // ambiguous indexOf search; the stripped pipe prefix is added back
+        // so the box lands on the amount, not the divider.
+        const rawLine = totalLine[1];
+        const leading = rawLine.length - rawLine.trimStart().length;
+        const trimmed = rawLine.trim();
         const valueStart =
-          totalLine.index + totalLine[0].length - raw.length + leading;
+          totalLine.index +
+          totalLine[0].length -
+          rawLine.length +
+          leading +
+          (trimmed.length - rest.length);
         const totalLineRef = geo.lineOf(page.pageNumber, other.lineNumber);
         totalClaims.push({
           page: page.pageNumber,
@@ -352,8 +354,9 @@ function collectPageTotals(
       continue;
     }
 
-    const labelledTotal =
-      /^Total\s+([A-Za-z][A-Za-z ]*?):\s*(.+)$/.exec(other.text);
+    const labelledTotal = /^Total\s+([A-Za-z][A-Za-z ]*?):\s*(.+)$/.exec(
+      other.text,
+    );
     if (labelledTotal) {
       const label = labelledTotal[1].trim().toLowerCase();
       const rest = labelledTotal[2].trim();
@@ -415,21 +418,40 @@ function resolvePageTotals(
   }
 }
 
-// A stated total is checked against its own page's line totals only —
+// A stated total is checked against its own page's line totals only -
 // each page/section of a multi-page document stands on its own. This is
-// the one bonus cross-check: genuine conflict in stated numbers.
+// the one cross-check: genuine conflict in stated numbers. The only number
+// ever interpreted is a trailing money cell ("$" required, so a trailing
+// quantity or note column can't be mistaken for a total). The check needs a
+// price column and a total column, so it runs only when every row carries
+// at least two money cells - anything less is skipped, never guessed.
 function checkPageTotals(
   pageBuilds: Map<number, PageBuild>,
   issues: Issue[],
 ): void {
   for (const build of pageBuilds.values()) {
-    if (build.total) {
-      const lineTotals = build.items
-        .map((i) => i.lineTotal)
-        .filter((lt): lt is FieldValue => lt !== undefined);
-      const mismatch = totalMismatchIssue(build.total, lineTotals);
-      if (mismatch) issues.push(mismatch);
+    if (!build.total || build.items.length === 0) continue;
+    const lineTotals: FieldValue[] = [];
+    let complete = true;
+    for (const item of build.items) {
+      const moneyCells = item.cells.filter((cell) =>
+        cell.value.includes("$"),
+      );
+      const last = item.cells[item.cells.length - 1];
+      if (
+        moneyCells.length < 2 ||
+        !last ||
+        !last.value.includes("$") ||
+        parseLeadingAmount(last.value) === null
+      ) {
+        complete = false;
+        break;
+      }
+      lineTotals.push({ value: last.value, evidence: last.evidence });
     }
+    if (!complete) continue;
+    const mismatch = totalMismatchIssue(build.total, lineTotals);
+    if (mismatch) issues.push(mismatch);
   }
 }
 
@@ -447,6 +469,10 @@ function assemblePages(
       ...(build?.total ? { total: build.total } : {}),
       items: build?.items ?? [],
       refusals: build?.refusals ?? [],
+      ...(build?.tableLabels ? { tableLabels: build.tableLabels } : {}),
+      ...(build?.tableHeaderText
+        ? { tableHeaderText: build.tableHeaderText }
+        : {}),
     };
   });
 }
@@ -457,7 +483,10 @@ function distributeViolations(
   pages: ResultPage[],
   violations: Refusal[],
 ): ResultPage[] {
-  const copies = pages.map((page) => ({ ...page, refusals: [...page.refusals] }));
+  const copies = pages.map((page) => ({
+    ...page,
+    refusals: [...page.refusals],
+  }));
   const byPage = new Map(copies.map((page) => [page.pageNumber, page]));
   for (const violation of violations) {
     const target = byPage.get(violation.scope.page) ?? copies[0];

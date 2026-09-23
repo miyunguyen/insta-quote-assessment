@@ -1,4 +1,4 @@
-import type { BadRow } from "./parse";
+import type { BadRow, TableProblem } from "./parse";
 import type { EvidenceRect, Refusal } from "./types";
 
 export function pageNoTextRefusal(pageNumber: number): Refusal {
@@ -29,7 +29,7 @@ export function badRowRefusal(
     code: "unreadable_value",
     scope: { page: pageNumber, section, row: row.lineNumber },
     plainLanguage: `One line on page ${pageNumber} didn't match this document's table columns, so we couldn't tell which number meant what. It was left out rather than guessed. The line reads: "${row.lineText}"`,
-    technicalDetail: `Row at line ${row.lineNumber} has ${row.actualCells} cells; header defines ${row.expectedCells}. Row skipped (badRow).`,
+    technicalDetail: `Row at line ${row.lineNumber} has ${row.actualCells} cells; header defines ${row.expectedCells}.${row.detail ? ` ${row.detail}.` : ""} Row skipped (badRow).`,
     evidence: { page: pageNumber, sourceText: row.lineText, rect },
   };
 }
@@ -62,6 +62,42 @@ export function valueNotStatedRefusal(
     plainLanguage: `The document refers to a total ${label} on page ${pageNumber} but doesn't give a number for it — it says "${quoted}". We only report numbers that are actually written in the document, so nothing was extracted for this.`,
     technicalDetail: `Line "${sourceText}" matched a total-${label} pattern but its value did not parse as a numeric amount.`,
     evidence: { page: pageNumber, sourceText, rect },
+  };
+}
+
+export function unparseableTableRefusal(
+  pageNumber: number,
+  section: string,
+  problem: TableProblem,
+  rect?: EvidenceRect,
+): Refusal {
+  let plainLanguage: string;
+  let technicalDetail: string;
+  switch (problem.kind) {
+    case "no_header":
+      plainLanguage =
+        `A table on page ${pageNumber} has a divider line but no readable column headings above it, ` +
+        `so there is no way to present its rows. The whole table was left out rather than guessed. ` +
+        `The divider reads: "${problem.separatorText}"`;
+      technicalDetail =
+        `Separator-anchored table at line ${problem.separatorLineNumber} has no usable header line ` +
+        `above it; table refused as a whole (no_header).`;
+      break;
+    default: {
+      const exhaustive: never = problem.kind;
+      throw new Error(`Unhandled table problem kind: ${exhaustive}`);
+    }
+  }
+  return {
+    code: "unparseable_table",
+    scope: { page: pageNumber, section },
+    plainLanguage,
+    technicalDetail,
+    evidence: {
+      page: pageNumber,
+      sourceText: problem.headerText ?? problem.separatorText,
+      rect,
+    },
   };
 }
 

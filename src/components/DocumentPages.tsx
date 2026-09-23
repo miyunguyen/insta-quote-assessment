@@ -1,4 +1,5 @@
 import type {
+  CellValue,
   DocumentFields,
   FieldValue,
   LineItem,
@@ -14,35 +15,38 @@ type ViewerProps = {
   pageCount: number;
 };
 
-const FIELD_LABELS: Array<{
-  key: keyof Pick<
-    LineItem,
-    "quantity" | "unit" | "weight" | "unitPrice" | "lineTotal"
-  >;
-  label: string;
-}> = [
-  { key: "quantity", label: "Quantity" },
-  { key: "unit", label: "Unit" },
-  { key: "weight", label: "Weight" },
-  { key: "unitPrice", label: "Unit price" },
-  { key: "lineTotal", label: "Line total" },
-];
-
+// Cells are plain text with the document's own headings (or generic Column
+// N when the headings don't line up with the data). No field semantics.
 export function ItemsTable({
   items,
+  labels,
+  headerText,
   pdfUrl,
   pageCount,
-}: { items: LineItem[] } & ViewerProps) {
+}: {
+  items: LineItem[];
+  labels: string[] | null;
+  headerText: string | null;
+} & ViewerProps) {
+  const columnCount = Math.max(0, ...items.map((item) => item.cells.length));
+  const headings = Array.from(
+    { length: columnCount },
+    (_, i) => labels?.[i] || `Column ${i + 1}`,
+  );
   return (
     <div className="overflow-x-auto rounded-lg border border-neutral-200 bg-white">
+      {labels === null && headerText && (
+        <p className="border-b border-neutral-200 bg-neutral-50 px-4 py-2 text-[13px] text-neutral-600">
+          Columns as labeled in the document:{" "}
+          <span className="font-mono">{headerText}</span>
+        </p>
+      )}
       <table className="w-full border-collapse text-left">
         <thead>
           <tr className="border-b border-neutral-200 bg-neutral-50 text-xs uppercase tracking-wide text-neutral-600">
-            <th className="px-4 py-2.5 font-medium">Item</th>
-            <th className="px-4 py-2.5 font-medium">Description</th>
-            {FIELD_LABELS.map(({ key, label }) => (
-              <th key={key} className="px-4 py-2.5 font-medium">
-                {label}
+            {headings.map((heading) => (
+              <th key={heading} className="px-4 py-2.5 font-medium">
+                {heading}
               </th>
             ))}
           </tr>
@@ -53,59 +57,46 @@ export function ItemsTable({
               key={index}
               className="border-b border-neutral-100 last:border-0"
             >
-              <td className="px-4 py-3 align-top font-mono text-[15px] text-neutral-500">
-                {index + 1}
-              </td>
-              <td className="max-w-xs px-4 py-3">
-                <div className="text-[15px] text-neutral-900">
-                  {item.description.value}
-                </div>
-                <div className="mt-1.5">
-                  <EvidenceButton
-                    page={item.description.evidence.page}
-                    sourceText={item.description.evidence.sourceText}
-                    rect={item.description.evidence.rect}
-                    pdfUrl={pdfUrl}
-                    pageCount={pageCount}
-                    label="Description"
-                  />
-                </div>
-              </td>
-              {FIELD_LABELS.map(({ key, label }) => {
-                const field = item[key];
-                if (!field) {
-                  return (
-                    <td
-                      key={key}
-                      className="px-4 py-3 align-top text-sm italic text-neutral-400"
-                    >
-                      N/A
-                    </td>
-                  );
-                }
-                return (
-                  <td key={key} className="px-4 py-3 align-top">
-                    <div className="font-mono text-[15px] text-neutral-900">
-                      {field.value}
-                    </div>
-                    <div className="mt-1.5">
-                      <EvidenceButton
-                        page={field.evidence.page}
-                        sourceText={field.evidence.sourceText}
-                        rect={field.evidence.rect}
-                        pdfUrl={pdfUrl}
-                        pageCount={pageCount}
-                        label={label}
-                      />
-                    </div>
-                  </td>
-                );
-              })}
+              {item.cells.map((cell, cellIndex) => (
+                <Cell
+                  key={cellIndex}
+                  cell={cell}
+                  heading={headings[cellIndex] ?? `Column ${cellIndex + 1}`}
+                  pdfUrl={pdfUrl}
+                  pageCount={pageCount}
+                />
+              ))}
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function Cell({
+  cell,
+  heading,
+  pdfUrl,
+  pageCount,
+}: {
+  cell: CellValue;
+  heading: string;
+} & ViewerProps) {
+  return (
+    <td className="max-w-xs px-4 py-3 align-top">
+      <div className="font-mono text-[15px] text-neutral-900">{cell.value}</div>
+      <div className="mt-1.5">
+        <EvidenceButton
+          page={cell.evidence.page}
+          sourceText={cell.evidence.sourceText}
+          rect={cell.evidence.rect}
+          pdfUrl={pdfUrl}
+          pageCount={pageCount}
+          label={heading}
+        />
+      </div>
+    </td>
   );
 }
 
@@ -194,6 +185,8 @@ export function PageBlock({
         <div className={pageHasDocument(page) ? "mt-4" : ""}>
           <ItemsTable
             items={page.items}
+            labels={page.tableLabels ?? null}
+            headerText={page.tableHeaderText ?? null}
             pdfUrl={pdfUrl}
             pageCount={pageCount}
           />
